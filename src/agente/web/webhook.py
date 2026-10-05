@@ -191,7 +191,11 @@ def armar_lector(config: Config, canal: Chatwoot) -> Lector:
         )
     transcribir = None
     if config.transcribir_audios and config.clave_openai:
-        transcribir = TranscriptorOpenAI(config.clave_openai, config.modelo_transcripcion)
+        transcribir = TranscriptorOpenAI(
+            config.clave_openai,
+            config.modelo_transcripcion,
+            config.url_transcripcion,
+        )
     return Lector(canal, describir=describir, transcribir=transcribir)
 
 

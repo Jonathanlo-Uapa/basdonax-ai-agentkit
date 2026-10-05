@@ -475,11 +475,17 @@ _ABRIDOR_OPENAI = urllib.request.build_opener(
 
 
 class TranscriptorOpenAI:
-    """Pasa un audio a texto con la API de OpenAI (sin dependencias nuevas)."""
+    """Pasa un audio a texto con la API de OpenAI o compatible (Groq, etc.)."""
 
-    def __init__(self, clave: str, modelo: str = "gpt-4o-mini-transcribe") -> None:
+    def __init__(
+        self,
+        clave: str,
+        modelo: str = "gpt-4o-mini-transcribe",
+        url: str = URL_DE_TRANSCRIPCION,
+    ) -> None:
         self.clave = clave
         self.modelo = modelo
+        self.url = (url or URL_DE_TRANSCRIPCION).strip()
 
     def __repr__(self) -> str:
         return f"TranscriptorOpenAI(modelo={self.modelo!r})"  # sin la clave
@@ -501,10 +507,13 @@ class TranscriptorOpenAI:
             ]
         )
         pedido = urllib.request.Request(
-            URL_DE_TRANSCRIPCION,
+            self.url,
             data=cuerpo,
             method="POST",
-            headers={"Content-Type": f"multipart/form-data; boundary={limite}"},
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={limite}",
+                "User-Agent": "basdonax-ai-agentkit/1.0",
+            },
         )
         # «Sin redirigir»: aunque alguien cambie el abridor, la clave no viaja a otro servidor.
         pedido.add_unredirected_header("Authorization", f"Bearer {self.clave}")
@@ -514,10 +523,10 @@ class TranscriptorOpenAI:
         except urllib.error.HTTPError as e:
             detalle = e.read().decode("utf-8", "replace")[:200] if e.fp else ""
             if e.code == 401:
-                raise ValueError("OpenAI no acepta la clave (OPENAI_API_KEY) para transcribir.") from None
+                raise ValueError("El servicio de transcripción no acepta la clave (OPENAI_API_KEY).") from None
             if e.code == 429:
-                raise ValueError("OpenAI frenó la transcripción: sin saldo o demasiados pedidos (429).") from None
-            raise ValueError(f"OpenAI contestó {e.code} al transcribir: {_limpio(detalle)}") from None
+                raise ValueError("El servicio de transcripción frenó la transcripción: sin saldo o demasiados pedidos (429).") from None
+            raise ValueError(f"El servicio de transcripción contestó {e.code} al transcribir: {_limpio(detalle)}") from None
         return str(datos_de_vuelta.get("text") or "").strip()
 
 

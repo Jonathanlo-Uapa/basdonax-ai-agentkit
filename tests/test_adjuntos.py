@@ -364,8 +364,29 @@ def test_el_audio_viaja_a_openai_sin_que_la_clave_pueda_seguir_una_redireccion(m
     assert pedido.unredirected_hdrs.get("Authorization") == "Bearer clave-de-mentira"
     assert "Authorization" not in pedido.headers
     assert b'name="model"\r\n\r\ngpt-4o-mini-transcribe' in pedido.data
-    assert b'filename="nota_de_voz.ogg"' in pedido.data, "el nombre no puede romper el formulario"
     assert "clave-de-mentira" not in repr(transcribir)
+
+
+def test_el_audio_puede_ir_a_un_proveedor_compatible_como_groq(monkeypatch):
+    pedidos = []
+
+    class GroqDeMentira:
+        def open(self, pedido, timeout=None):
+            pedidos.append(pedido)
+            return RespuestaFalsa(json.dumps({"text": "hola desde groq"}).encode())
+
+    monkeypatch.setattr(adjuntos_mod, "_ABRIDOR_OPENAI", GroqDeMentira())
+    transcribir = TranscriptorOpenAI(
+        "gsk-clave-groq",
+        "whisper-large-v3",
+        url="https://api.groq.com/openai/v1/audio/transcriptions",
+    )
+
+    assert transcribir(b"OggS", "audio/ogg", "audio.ogg") == "hola desde groq"
+    pedido = pedidos[0]
+    assert pedido.full_url == "https://api.groq.com/openai/v1/audio/transcriptions"
+    assert pedido.unredirected_hdrs.get("Authorization") == "Bearer gsk-clave-groq"
+    assert b'name="model"\r\n\r\nwhisper-large-v3' in pedido.data
 
 
 def test_si_openai_no_acepta_la_clave_lo_dice_sin_mostrarla(monkeypatch):

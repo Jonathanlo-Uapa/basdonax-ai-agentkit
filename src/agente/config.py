@@ -106,6 +106,7 @@ class Config:
     # use otro proveedor. Sin clave, el audio pasa a una persona.
     transcribir_audios: bool = True
     modelo_transcripcion: str = "gpt-4o-mini-transcribe"
+    url_transcripcion: str = "https://api.openai.com/v1/audio/transcriptions"
     clave_openai: str = field(default="", repr=False)
 
     # -- El ritmo de persona ----------------------------------------------------
@@ -241,6 +242,10 @@ class Config:
             transcribir_audios=_booleano("TRANSCRIBIR_AUDIOS", True),
             modelo_transcripcion=(
                 os.getenv("MODELO_TRANSCRIPCION") or "gpt-4o-mini-transcribe"
+            ).strip(),
+            url_transcripcion=(
+                os.getenv("URL_TRANSCRIPCION")
+                or "https://api.openai.com/v1/audio/transcriptions"
             ).strip(),
             clave_openai=(os.getenv("OPENAI_API_KEY") or "").strip(),
             pausa_entre_globos=_booleano("PAUSA_ENTRE_GLOBOS", True),
