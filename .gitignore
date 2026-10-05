@@ -1,0 +1,51 @@
+# Credenciales — NUNCA se suben. Cualquier .env (también .env.produccion,
+# .env.bak o «.env copy»), salvo el de ejemplo.
+.env*
+!.env.example
+*.key
+credenciales*.json
+# El JSON del cliente de Google Cloud (trae la clave adentro): conectar_gmail.py
+# lo busca en esta carpeta, así que puede quedar acá.
+client_secret*.json
+# El acceso a n8n del actualizador: la dirección y la clave de la API
+n8n-acceso.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs y temporales
+*.log
+tmp/
+temp/
+
+# Base de datos local de conversaciones (MODO=test)
+datos/
+*.db
+*.sqlite3
+_vista-previa.html
+
+# Los respaldos del actualizador de n8n: son flujos enteros, con ids de credenciales adentro
+respaldos-n8n/
+# El código propio de una Format Chain que se saca para agregarle la elección
+format_chain_propia.js
