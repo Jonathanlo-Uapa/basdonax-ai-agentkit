@@ -32,7 +32,7 @@ WORKDIR /app
 # que deja es "New container is not healthy, rolling back": no dice que falte
 # curl, y se pierde un rato largo buscando el error en otro lado.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Las dependencias primero y el código después: así, mientras no toques los
