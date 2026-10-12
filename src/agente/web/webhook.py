@@ -43,13 +43,15 @@ import re
 import secrets
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ..agente import Agente
 from ..avisos import Avisos
-from ..calcom import Calcom
+from ..calcom import HORA_RD, Calcom, ahora_en_rd
+from ..ventas import fecha_dicha, hora_dicha
 from ..canales.adjuntos import DescriptorDeFotos, Lector, TranscriptorOpenAI
 from ..canales.base import MensajeEntrante
 from ..canales.buffer import BufferDeMensajes
@@ -347,6 +349,7 @@ def crear_app(
     # resuelta. Una vez por conversación alcanza: si estaba cerrada, desde ahí
     # la frena la etiqueta.
     revisadas: set[str] = set()
+    recordatorios_demos: list[dict] = []
 
     def en_segundo_plano(corrutina) -> asyncio.Task:
         tarea = asyncio.create_task(corrutina)
@@ -803,6 +806,34 @@ def crear_app(
         except Exception as e:
             registro.error("[%s] no se pudo marcar como resuelta: %s", conversacion, e)
 
+    async def verificar_recordatorios_demos() -> None:
+        """Revisa periódicamente las citas para enviar el recordatorio 15 minutos antes."""
+        while True:
+            try:
+                ahora = ahora_en_rd()
+                for r in list(recordatorios_demos):
+                    if not r.get("enviado") and r.get("inicio"):
+                        inicio = r["inicio"]
+                        # Si faltan entre 0 y 16 minutos para la cita
+                        if ahora >= inicio - timedelta(minutes=16) and ahora < inicio:
+                            r["enviado"] = True
+                            conv = r.get("conversacion")
+                            nom = r.get("nombre") or "Cliente"
+                            enl = r.get("enlace") or ""
+                            msg = (
+                                f"¡Hola {nom}! 👋 En 15 minutos arranca tu videollamada de bienvenida y "
+                                f"walkthrough con Jonathan Lopez (COO de LavaPass).\n\n"
+                                f"Nos vemos aquí en Google Meet: {enl} 📲"
+                            )
+                            try:
+                                await asyncio.to_thread(canal.enviar, conv, [msg])
+                                registro.info("[%s] recordatorio de 15 min enviado exitosamente", conv)
+                            except Exception as e:
+                                registro.warning("[%s] no se pudo enviar recordatorio de 15 min: %s", conv, e)
+            except Exception as e:
+                registro.error("Error en bucle de recordatorios de demos: %s", e)
+            await asyncio.sleep(30)
+
     async def preparar(entrante: MensajeEntrante, revisar: bool, leer: bool) -> str:
         """Lo que tarda, fuera del camino del 200: si ya se cerró con esa persona, y leer lo que no es texto.
 
@@ -875,9 +906,11 @@ def crear_app(
             if avisos.activos and avisos.metodo == "google"
             else None
         )
+        cuidar_recordatorios = asyncio.create_task(verificar_recordatorios_demos())
         yield
         if cuidar_el_permiso is not None:
             cuidar_el_permiso.cancel()
+        cuidar_recordatorios.cancel()
         # Al apagar, soltamos lo que estaba esperando y esperamos (un rato)
         # lo que corría en segundo plano. Sin esto, un deploy justo en esos
         # segundos se come la ráfaga de alguien o lo deja sin la etiqueta.
@@ -1051,6 +1084,163 @@ def crear_app(
             "mensaje": "Minuta registrada y notificada exitosamente",
             "contacto_id": contacto_id,
             "conversacion": conversacion,
+        })
+
+    @app.post("/calcom/webhook/{token}")
+    @app.post("/calcom/webhook")
+    async def webhook_calcom(pedido: Request, token: str = "") -> JSONResponse:
+        """Recibe eventos automáticos de Cal.com Cloud (BOOKING_CREATED, etc.).
+
+        Sincroniza la reserva con Chatwoot, notifica por WhatsApp proactivamente
+        con el enlace de Google Meet, envía alerta a Slack y programa el
+        recordatorio de 15 minutos.
+        """
+        tok = (
+            token
+            or pedido.headers.get("x-webhook-token")
+            or str(pedido.query_params.get("token") or "")
+        ).strip()
+        if tok and not token_valido(tok):
+            return JSONResponse({"error": "no autorizado"}, status_code=401)
+
+        cuerpo = await _leer_con_tope(pedido)
+        try:
+            datos = json.loads(cuerpo) if cuerpo else {}
+        except Exception:
+            datos = {}
+        if not isinstance(datos, dict):
+            return JSONResponse({"error": "esperaba JSON"}, status_code=400)
+
+        evento_tipo = str(datos.get("triggerEvent") or datos.get("event") or "").strip()
+        payload = datos.get("payload") if isinstance(datos.get("payload"), dict) else datos
+        if not isinstance(payload, dict):
+            return JSONResponse({"estado": "ignorado"})
+
+        if evento_tipo and evento_tipo not in ("BOOKING_CREATED", "BOOKING_RESCHEDULED"):
+            registro.info("Cal.com webhook evento ignorado: %s", evento_tipo)
+            return JSONResponse({"estado": "ignorado", "evento": evento_tipo})
+
+        booking = payload.get("booking") if isinstance(payload.get("booking"), dict) else payload
+        uid = str(booking.get("uid") or "").strip()
+        start_raw = str(booking.get("startTime") or booking.get("start") or "").strip()
+        meet_url = str(booking.get("meetingUrl") or booking.get("location") or "").strip()
+
+        attendees = booking.get("attendees") or []
+        primer_att = attendees[0] if isinstance(attendees, list) and attendees and isinstance(attendees[0], dict) else {}
+        nombre = str(primer_att.get("name") or "Cliente").strip()
+        email = str(primer_att.get("email") or "").strip()
+        telefono = str(primer_att.get("phoneNumber") or "").strip()
+
+        metadata = booking.get("metadata") if isinstance(booking.get("metadata"), dict) else {}
+        conversacion_id = str(metadata.get("conversacion_chatwoot") or metadata.get("conversacion") or "").strip()
+
+        contacto_id = ""
+        if not conversacion_id and hasattr(canal, "buscar_contacto"):
+            contacto = None
+            for termino in (telefono, email):
+                if termino:
+                    try:
+                        contacto = await asyncio.to_thread(canal.buscar_contacto, termino)
+                        if contacto:
+                            break
+                    except Exception:
+                        pass
+            if contacto:
+                contacto_id = str(contacto.get("id") or "")
+                if hasattr(canal, "conversaciones_de_contacto"):
+                    try:
+                        convs = await asyncio.to_thread(canal.conversaciones_de_contacto, contacto_id)
+                        if convs:
+                            conversacion_id = str(convs[0].get("id") or "")
+                    except Exception:
+                        pass
+
+        momento_inicio = None
+        if start_raw:
+            try:
+                momento_inicio = datetime.fromisoformat(start_raw.replace("Z", "+00:00")).astimezone(HORA_RD)
+                fecha_str = f"{fecha_dicha(momento_inicio)} a las {hora_dicha(momento_inicio)} (hora de RD)"
+            except Exception:
+                fecha_str = start_raw
+        else:
+            fecha_str = "horario coordinado"
+
+        attrs_crm = {}
+        if conversacion_id:
+            try:
+                await asyncio.to_thread(
+                    canal.guardar_atributos,
+                    conversacion_id,
+                    {
+                        "demo_uid": uid,
+                        "demo_inicio": start_raw,
+                        "etapa_embudo": "5_demo_agendada",
+                    },
+                )
+            except Exception as e:
+                registro.warning("[%s] no se pudo guardar atributos de demo en Chatwoot: %s", conversacion_id, e)
+
+            if hasattr(canal, "reemplazar_etapa"):
+                try:
+                    await asyncio.to_thread(canal.reemplazar_etapa, conversacion_id, "5_demo_agendada")
+                except Exception:
+                    pass
+
+            if hasattr(canal, "sumar_etiqueta"):
+                try:
+                    await asyncio.to_thread(canal.sumar_etiqueta, conversacion_id, "demo_agendada")
+                except Exception:
+                    pass
+
+            try:
+                attrs_crm = await asyncio.to_thread(canal.atributos, conversacion_id)
+            except Exception:
+                pass
+            ficha = armar_ficha_prospecto(attrs_crm, telefono, fecha_str)
+            try:
+                await asyncio.to_thread(canal.nota_interna, conversacion_id, ficha)
+            except Exception:
+                pass
+
+            msg_confirmacion = (
+                f"¡Excelente, {nombre}! 🚀 Acabo de confirmar tu videollamada para el {fecha_str} "
+                f"con Jonathan Lopez (COO) por Google Meet.\n\n"
+                f"Aquí tienes tu enlace de acceso directo:\n{meet_url or 'Google Meet (te llegará por correo)'}\n\n"
+                f"Te enviaremos un recordatorio 15 minutos antes de la cita para que lo tengas fresco 📲 "
+                f"Mientras llega el día, ¿tienes alguna duda puntual sobre el control de caja o comisiones de "
+                f"lavadores que quieras que Jonathan te muestre en pantalla?"
+            )
+            try:
+                await asyncio.to_thread(canal.enviar, conversacion_id, [msg_confirmacion])
+            except Exception as e:
+                registro.warning("[%s] no se pudo enviar confirmación por WhatsApp: %s", conversacion_id, e)
+
+        if momento_inicio and conversacion_id:
+            recordatorios_demos.append({
+                "conversacion": conversacion_id,
+                "inicio": momento_inicio,
+                "nombre": nombre,
+                "enlace": meet_url,
+                "enviado": False,
+            })
+
+        if slack.activo:
+            chatwoot_url = canal.enlace(conversacion_id) if conversacion_id else ""
+            await asyncio.to_thread(
+                slack.notificar_demo,
+                nombre=nombre,
+                telefono=telefono,
+                fecha_hora=fecha_str,
+                estaciones=attrs_crm.get("estaciones") or 1 if conversacion_id else 1,
+                dolor=str(attrs_crm.get("dolor_principal") or "") if conversacion_id else "",
+                chatwoot_url=chatwoot_url,
+            )
+
+        return JSONResponse({
+            "estado": "ok",
+            "uid": uid,
+            "conversacion": conversacion_id,
+            "fecha": fecha_str,
         })
 
     @app.post("/chatwoot/{token}")

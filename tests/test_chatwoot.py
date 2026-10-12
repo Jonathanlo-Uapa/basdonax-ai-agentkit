@@ -103,6 +103,17 @@ class ChatwootFalso(Chatwoot):
         if partes[0] == "contacts" and partes[-1] == "conversations":
             estado = "resolved" if self.resueltas_del_contacto else "open"
             return {"payload": [{"id": 5, "status": estado}]}
+        if partes[0] == "contacts" and len(partes) >= 2 and partes[1].startswith("search"):
+            return {
+                "payload": [
+                    {
+                        "id": 300,
+                        "name": "Ana",
+                        "phone_number": "+18095551234",
+                        "email": "ana@ejemplo.com",
+                    }
+                ]
+            }
         if partes[0] == "contacts" and len(partes) == 2:
             if metodo == "GET":
                 return {"payload": {"id": int(partes[1]), "custom_attributes": self.contactos_guardados.get(partes[1], {}).get("custom_attributes", {})}}
@@ -1595,5 +1606,119 @@ def test_webhook_minuta_demo_endpoint():
         assert "Pedro Rodriguez" in canal.notas_contacto[0]["content"]
         # Verificar que la etiqueta demo_realizada se sumó
         assert "demo_realizada" in canal.etiquetas_de("12")
+
+
+def test_chatwoot_buscar_contacto_y_conversaciones():
+    canal = ChatwootFalso()
+    contacto = canal.buscar_contacto("+18095551234")
+    assert contacto is not None
+    assert contacto["id"] == 300
+    assert contacto["name"] == "Ana"
+
+    convs = canal.conversaciones_de_contacto("300")
+    assert len(convs) == 1
+    assert convs[0]["id"] == 5
+
+    assert canal.buscar_contacto("") is None
+    assert canal.conversaciones_de_contacto("") == []
+
+
+def test_calcom_webhook_con_metadata():
+    from test_agente import agente_falso
+
+    canal = ChatwootFalso()
+    agente = agente_falso(["hola"])
+
+    with cliente(canal, agente) as web:
+        # 1. Token inválido da 401
+        res_bad = web.post("/calcom/webhook/token-invalido", json={"triggerEvent": "BOOKING_CREATED"})
+        assert res_bad.status_code == 401
+
+        # 2. Evento ignorado
+        res_ign = web.post(f"/calcom/webhook/{TOKEN}", json={"triggerEvent": "FORM_SUBMITTED"})
+        assert res_ign.json()["estado"] == "ignorado"
+
+        # 3. BOOKING_CREATED con metadata directo
+        payload = {
+            "triggerEvent": "BOOKING_CREATED",
+            "payload": {
+                "booking": {
+                    "uid": "cal_booking_999",
+                    "startTime": "2026-10-15T14:00:00.000Z",
+                    "meetingUrl": "https://meet.google.com/xyz-test",
+                    "attendees": [
+                        {
+                            "name": "Jonathan Lopez",
+                            "email": "jonathan@ejemplo.com",
+                            "phoneNumber": "+18095551234",
+                        }
+                    ],
+                    "metadata": {
+                        "conversacion_chatwoot": "12",
+                    },
+                }
+            },
+        }
+        res_ok = web.post(f"/calcom/webhook/{TOKEN}", json=payload)
+        assert res_ok.status_code == 200
+        datos_resp = res_ok.json()
+        assert datos_resp["estado"] == "ok"
+        assert datos_resp["uid"] == "cal_booking_999"
+        assert datos_resp["conversacion"] == "12"
+
+        # Atributos de conversación actualizados
+        attrs = canal.atributos("12")
+        assert attrs["demo_uid"] == "cal_booking_999"
+        assert attrs["demo_inicio"] == "2026-10-15T14:00:00.000Z"
+        assert attrs["etapa_embudo"] == "5_demo_agendada"
+
+        # Etiquetas actualizadas
+        assert "demo_agendada" in canal.etiquetas_de("12")
+        assert "5_demo_agendada" in canal.etiquetas_de("12")
+
+        # Mensaje de confirmación enviado por WhatsApp
+        envios = canal.envios()
+        assert len(envios) >= 1
+        assert "https://meet.google.com/xyz-test" in envios[-1]
+        assert "15 minutos antes" in envios[-1]
+        assert "Jonathan Lopez" in envios[-1]
+
+        # Nota interna guardada
+        notas = canal.notas()
+        assert len(notas) >= 1
+        assert "RESUMEN DE PROSPECTO" in notas[-1]
+
+
+def test_calcom_webhook_busqueda_contacto():
+    from test_agente import agente_falso
+
+    canal = ChatwootFalso()
+    agente = agente_falso(["hola"])
+
+    with cliente(canal, agente) as web:
+        # BOOKING_CREATED sin metadata (busca por teléfono en Chatwoot)
+        payload = {
+            "triggerEvent": "BOOKING_CREATED",
+            "payload": {
+                "booking": {
+                    "uid": "cal_search_111",
+                    "startTime": "2026-10-16T15:00:00.000Z",
+                    "meetingUrl": "https://meet.google.com/abc-test",
+                    "attendees": [
+                        {
+                            "name": "Ana Rodriguez",
+                            "phoneNumber": "+18095551234",
+                        }
+                    ],
+                }
+            },
+        }
+        res_ok = web.post(f"/calcom/webhook/{TOKEN}", json=payload)
+        assert res_ok.status_code == 200
+        # Contacto encontrado (id 300) y su conversación (id 5)
+        assert res_ok.json()["conversacion"] == "5"
+        attrs = canal.atributos("5")
+        assert attrs["demo_uid"] == "cal_search_111"
+        assert "demo_agendada" in canal.etiquetas_de("5")
 
 

@@ -51,6 +51,7 @@ HORA_RD = timezone(timedelta(hours=-4), "RD")
 
 VERSION_HORARIOS = "2024-09-04"
 VERSION_RESERVAS = "2026-02-25"
+VERSION_CONSULTA_RESERVAS = "2024-08-13"
 
 # Si Cal.com no contesta en este tiempo, cortamos: la persona está esperando.
 ESPERA = 15
@@ -158,6 +159,79 @@ class Calcom:
             "uid": str(reserva["uid"]),
             "comienzo": _leer_fecha(reserva.get("start")) or comienzo.astimezone(HORA_RD),
             "enlace": str(reserva.get("meetingUrl") or reserva.get("location") or ""),
+        }
+
+    def consultar_reserva(
+        self,
+        uid: str = "",
+        email: str = "",
+        telefono: str = "",
+    ) -> dict | None:
+        """Busca una reserva existente en Cal.com por su UID, correo o teléfono.
+
+        Devuelve un diccionario con los datos normalizados de la reserva o None.
+        """
+        uid = str(uid or "").strip()
+        if uid:
+            try:
+                datos = self._pedir("GET", f"/v2/bookings/{uid}", VERSION_CONSULTA_RESERVAS)
+                reserva = datos.get("data") if isinstance(datos, dict) else None
+                if isinstance(reserva, dict) and reserva.get("uid"):
+                    return self._armar_ficha_reserva(reserva)
+            except Exception:
+                pass
+
+        email_buscado = str(email or "").strip().lower()
+        tel_limpio = "".join(c for c in str(telefono or "") if c.isdigit())
+        if not email_buscado and not tel_limpio:
+            return None
+
+        try:
+            datos = self._pedir("GET", "/v2/bookings", VERSION_CONSULTA_RESERVAS)
+            lista = datos.get("data") if isinstance(datos, dict) else []
+            if not isinstance(lista, list):
+                lista = []
+        except Exception:
+            return None
+
+        for b in lista:
+            if not isinstance(b, dict):
+                continue
+            if str(b.get("status") or "").lower() == "cancelled":
+                continue
+
+            attendees = b.get("attendees") or []
+            for att in attendees if isinstance(attendees, list) else []:
+                if not isinstance(att, dict):
+                    continue
+                att_email = str(att.get("email") or "").strip().lower()
+                att_tel = "".join(c for c in str(att.get("phoneNumber") or "") if c.isdigit())
+
+                coincide_email = bool(email_buscado and email_buscado in att_email)
+                coincide_tel = False
+                if tel_limpio and att_tel:
+                    min_len = min(len(tel_limpio), len(att_tel))
+                    if min_len >= 7:
+                        coincide_tel = tel_limpio.endswith(att_tel[-7:]) or att_tel.endswith(tel_limpio[-7:])
+
+                if coincide_email or coincide_tel:
+                    return self._armar_ficha_reserva(b)
+
+        return None
+
+    def _armar_ficha_reserva(self, reserva: dict) -> dict:
+        attendees = reserva.get("attendees") or [{}]
+        primer_att = attendees[0] if attendees else {}
+        return {
+            "uid": str(reserva.get("uid") or ""),
+            "comienzo": _leer_fecha(reserva.get("start")),
+            "fin": _leer_fecha(reserva.get("end")),
+            "enlace": str(reserva.get("meetingUrl") or reserva.get("location") or ""),
+            "titulo": str(reserva.get("title") or ""),
+            "asistente": str(primer_att.get("name") or ""),
+            "email": str(primer_att.get("email") or ""),
+            "telefono": str(primer_att.get("phoneNumber") or ""),
+            "estado": str(reserva.get("status") or ""),
         }
 
     def _pedir(self, metodo: str, camino: str, version: str, datos: dict | None = None) -> dict:

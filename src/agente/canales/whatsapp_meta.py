@@ -88,3 +88,121 @@ def marcar_visto_y_escribiendo(wamid: str, token: str, numero_id: str) -> bool:
     except Exception as e:
         registro.info("no salió el visto (%s…): %s", wamid[:16], type(e).__name__)
         return False
+
+
+def enviar_botones(
+    numero_destino: str,
+    texto: str,
+    botones: list[tuple[str, str]],
+    token: str,
+    numero_id: str,
+) -> bool:
+    """Envía un mensaje interactivo con hasta 3 botones de respuesta rápida a WhatsApp.
+
+    botones: lista de tuplas (id, titulo). Cada título máximo 20 caracteres.
+    Devuelve True si Meta aceptó el envío. Nunca levanta excepciones.
+    """
+    numero_destino = "".join(c for c in str(numero_destino or "") if c.isdigit())
+    if not (numero_destino and texto and botones and token and numero_id) or not str(numero_id).isdigit():
+        return False
+
+    botones_payload = []
+    for b_id, b_titulo in botones[:3]:
+        botones_payload.append({
+            "type": "reply",
+            "reply": {
+                "id": str(b_id)[:256],
+                "title": str(b_titulo)[:20],
+            },
+        })
+
+    cuerpo = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": numero_destino,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": str(texto)},
+            "action": {"buttons": botones_payload},
+        },
+    }
+    pedido = urllib.request.Request(
+        f"https://graph.facebook.com/{VERSION_DE_LA_API}/{numero_id}/messages",
+        data=json.dumps(cuerpo).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    pedido.add_unredirected_header("Authorization", f"Bearer {token}")
+    try:
+        with _ABRIDOR.open(pedido, timeout=ESPERA) as respuesta:
+            respuesta.read()
+        return True
+    except Exception as e:
+        registro.info("no salieron los botones a %s: %s", numero_destino, type(e).__name__)
+        return False
+
+
+def enviar_lista(
+    numero_destino: str,
+    texto: str,
+    boton_lista: str,
+    secciones: list[dict],
+    token: str,
+    numero_id: str,
+) -> bool:
+    """Envía un mensaje interactivo con lista desplegable a WhatsApp.
+
+    boton_lista: texto del botón que abre el modal (máx 20 caracteres).
+    secciones: lista de secciones [{'title': '...', 'rows': [{'id': '...', 'title': '...', 'description': '...'}]}]
+    Devuelve True si Meta aceptó el envío. Nunca levanta excepciones.
+    """
+    numero_destino = "".join(c for c in str(numero_destino or "") if c.isdigit())
+    if not (numero_destino and texto and secciones and token and numero_id) or not str(numero_id).isdigit():
+        return False
+
+    secciones_payload = []
+    for s in secciones:
+        filas = []
+        for r in s.get("rows", []):
+            fila_dict = {
+                "id": str(r.get("id") or "")[:200],
+                "title": str(r.get("title") or "")[:24],
+            }
+            desc = str(r.get("description") or "").strip()
+            if desc:
+                fila_dict["description"] = desc[:72]
+            filas.append(fila_dict)
+        secciones_payload.append({
+            "title": str(s.get("title") or "Opciones")[:24],
+            "rows": filas[:10],
+        })
+
+    cuerpo = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": numero_destino,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": str(texto)},
+            "action": {
+                "button": str(boton_lista or "Ver opciones")[:20],
+                "sections": secciones_payload[:10],
+            },
+        },
+    }
+    pedido = urllib.request.Request(
+        f"https://graph.facebook.com/{VERSION_DE_LA_API}/{numero_id}/messages",
+        data=json.dumps(cuerpo).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    pedido.add_unredirected_header("Authorization", f"Bearer {token}")
+    try:
+        with _ABRIDOR.open(pedido, timeout=ESPERA) as respuesta:
+            respuesta.read()
+        return True
+    except Exception as e:
+        registro.info("no salió la lista a %s: %s", numero_destino, type(e).__name__)
+        return False

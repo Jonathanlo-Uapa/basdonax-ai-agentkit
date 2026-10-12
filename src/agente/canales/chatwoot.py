@@ -503,6 +503,37 @@ class Chatwoot(Canal):
             return
         self._api("POST", f"contacts/{contacto_id}/notes", {"content": texto})
 
+    def buscar_contacto(self, termino: str) -> dict | None:
+        """Busca un contacto en Chatwoot por teléfono, correo o nombre.
+
+        Devuelve el primer contacto encontrado o None.
+        """
+        termino = str(termino or "").strip()
+        if not termino:
+            return None
+        try:
+            query = urllib.parse.quote(termino)
+            res = self._api("GET", f"contacts/search?q={query}")
+            payload = res.get("payload") if isinstance(res, dict) else []
+            if isinstance(payload, list) and payload:
+                primer = payload[0]
+                return primer if isinstance(primer, dict) else None
+        except Exception:
+            pass
+        return None
+
+    def conversaciones_de_contacto(self, contacto_id: str) -> list[dict]:
+        """Devuelve la lista de conversaciones asociadas a un contacto en Chatwoot."""
+        contacto_id = str(contacto_id or "").strip()
+        if not contacto_id:
+            return []
+        try:
+            res = self._api("GET", f"contacts/{contacto_id}/conversations")
+            payload = res.get("payload") if isinstance(res, dict) else []
+            return [c for c in payload if isinstance(c, dict)]
+        except Exception:
+            return []
+
 
 
     # -- Los datos del prospecto (las herramientas de ventas) ------------------

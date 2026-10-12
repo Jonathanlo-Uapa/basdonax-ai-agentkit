@@ -610,6 +610,82 @@ def confirmar_reserva_demo(fecha_hora_iso: str, prospecto_nombre: str) -> str:
     return texto
 
 
+@tool
+def consultar_reserva_demo(
+    prospecto_email: str | None = None,
+    prospecto_telefono: str | None = None,
+    booking_uid: str | None = None,
+) -> str:
+    """Consulta en tiempo real en la agenda de Cal.com si el prospecto tiene una reserva de demo confirmada.
+
+    Úsala cuando el prospecto pregunte si su cita está lista, confirme que ya agendó por el enlace
+    de Cal.com, pregunte qué día y hora tiene su cita, o quiera verificar los datos de su
+    videollamada con Jonathan Lopez. NUNCA digas que no puedes ver el calendario: consulta con esta
+    herramienta.
+
+    Args:
+        prospecto_email: Correo electrónico con el que agendó en Cal.com (si lo dio).
+        prospecto_telefono: Teléfono con el que agendó (si no lo dio, sale de WhatsApp).
+        booking_uid: El identificador único de la reserva en Cal.com (si lo dio).
+    """
+    contexto = en_curso()
+    agenda = _agenda()
+    if agenda is None:
+        return f"{INTERNO}\nLa agenda no está disponible en este momento. Dile que un asesor le confirma su horario a la brevedad."
+
+    uid = str(booking_uid or "").strip()
+    email = str(prospecto_email or "").strip()
+    telefono = str(prospecto_telefono or "").strip()
+
+    if contexto is not None:
+        try:
+            attrs = contexto.canal.atributos(contexto.conversacion)
+            if not uid:
+                uid = str(attrs.get("demo_uid") or "").strip()
+            if not telefono:
+                telefono = str(contexto.canal.telefono_de(contexto.conversacion) or "")
+        except Exception:
+            pass
+
+    try:
+        reserva = agenda.consultar_reserva(uid=uid, email=email, telefono=telefono)
+    except Exception as e:
+        registro.error("Error al consultar reserva en Cal.com: %s", e)
+        return f"{INTERNO}\nOcurrió un error al consultar la agenda ({type(e).__name__}: {e}). Dile que estamos verificando su horario."
+
+    if not reserva or not reserva.get("uid"):
+        return (
+            f"{INTERNO}\nNo se encontró ninguna reserva activa con esos datos. "
+            "Si reservó recién con otro correo o teléfono, pídeselo amablemente, "
+            "o ofrécele agendarle directamente los horarios disponibles."
+        )
+
+    # Si la encontramos, actualizamos los datos en Chatwoot para mantener todo sincronizado
+    if contexto is not None:
+        try:
+            contexto.canal.guardar_atributos(
+                contexto.conversacion,
+                {
+                    "demo_uid": reserva["uid"],
+                    "demo_inicio": reserva["comienzo"].isoformat() if reserva.get("comienzo") else "",
+                    "etapa_embudo": "5_demo_agendada",
+                },
+            )
+            if hasattr(contexto.canal, "reemplazar_etapa"):
+                contexto.canal.reemplazar_etapa(contexto.conversacion, "5_demo_agendada")
+        except Exception as e:
+            registro.warning("[%s] no se pudo guardar demo consultada en Chatwoot: %s", contexto.conversacion, e)
+
+    fecha_formateada = _cuando(reserva["comienzo"]) if reserva.get("comienzo") else "horario reservado"
+    resultado = (
+        f"{INTERNO}\nReserva confirmada en Cal.com: {fecha_formateada} (hora de RD).\n"
+        f"Videollamada de 15 minutos con {ANFITRION} por Google Meet.\n"
+        f"Enlace: {reserva.get('enlace') or 'Google Meet (por llegar)'}. Asistente: {reserva.get('asistente') or 'Prospecto'}.\n"
+        "Confírmale con entusiasmo el día y la hora exactos, dale el enlace de Google Meet y avísale que recibirá un recordatorio 15 minutos antes."
+    )
+    return resultado
+
+
 # Lo que el agente tiene atado. Cuando agregues otra herramienta, sumala acá:
 # es la única lista que mira el grafo.
 HERRAMIENTAS = [
@@ -617,6 +693,7 @@ HERRAMIENTAS = [
     sync_prospecto_chatwoot,
     verificar_disponibilidad_demo,
     confirmar_reserva_demo,
+    consultar_reserva_demo,
 ]
 
 
