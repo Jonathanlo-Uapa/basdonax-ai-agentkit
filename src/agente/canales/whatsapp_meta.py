@@ -294,8 +294,31 @@ def extraer_o_detectar_botones(texto: str) -> tuple[str, list[tuple[str, str]]]:
     # 3. Detección semántica de preguntas de calificación estándar
     texto_b = texto.lower()
 
+    # Si es el saludo inicial o pregunta de identificación (Nombre / Car Wash),
+    # NUNCA lleva botones: el cliente debe escribir su nombre y negocio en texto libre.
+    if (
+        "¿con quién tengo el gusto" in texto_b
+        or "con quien tengo el gusto" in texto_b
+        or "cómo se llama tu car wash" in texto_b
+        or "como se llama tu car wash" in texto_b
+        or "nombre de tu car wash" in texto_b
+        or "¿cómo te llamas" in texto_b
+        or "como te llamas" in texto_b
+    ):
+        return _limpiar_frases_prohibidas(texto), []
+
     # Bloque: Rol en el negocio
-    if ("rol" in texto_b or "cargo" in texto_b or "puesto" in texto_b) and (
+    if (
+        "¿cuál es tu rol" in texto_b
+        or "cual es tu rol" in texto_b
+        or "¿qué rol" in texto_b
+        or "que rol" in texto_b
+        or "¿cuál es tu cargo" in texto_b
+        or "cual es tu cargo" in texto_b
+        or "tu rol en el negocio" in texto_b
+        or "tu rol en el car wash" in texto_b
+        or "eres el dueño" in texto_b
+    ) and (
         "dueño" in texto_b or "administrador" in texto_b or "encargado" in texto_b
     ):
         botones = [
@@ -338,18 +361,22 @@ def extraer_o_detectar_botones(texto: str) -> tuple[str, list[tuple[str, str]]]:
         texto_limpio = _limpiar_frases_prohibidas(texto)
         return texto_limpio, botones
 
-    # Bloque: Dolor principal
+    # Bloque: Dolor principal (solo cuando formula una PREGUNTA explícita sobre el dolor o desafío)
     if (
-        "dolor" in texto_b
-        or "desafío" in texto_b
-        or "desafio" in texto_b
-        or "cuesta más dinero" in texto_b
-        or "cuesta mas dinero" in texto_b
-        or "quita más tiempo" in texto_b
-        or "quita mas tiempo" in texto_b
-        or "fuga" in texto_b
-    ) and (
-        "caja" in texto_b or "gaveta" in texto_b or "comisiones" in texto_b or "lluvia" in texto_b
+        "¿cuál es el dolor" in texto_b
+        or "cual es el dolor" in texto_b
+        or "¿cuál es tu dolor" in texto_b
+        or "cual es tu dolor" in texto_b
+        or "¿cuál es tu mayor dolor" in texto_b
+        or "cual es tu mayor dolor" in texto_b
+        or "¿cuál es el mayor desafío" in texto_b
+        or "cual es el mayor desafio" in texto_b
+        or "dolor o desafío que más te cuesta" in texto_b
+        or "dolor o desafio que mas te cuesta" in texto_b
+        or "dolor que más te cuesta" in texto_b
+        or "dolor que mas te cuesta" in texto_b
+        or "¿qué es lo que más te cuesta" in texto_b
+        or "que es lo que mas te cuesta" in texto_b
     ):
         botones = [
             ("dolor_caja", "💰 Cuadre de caja"),

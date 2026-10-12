@@ -217,3 +217,17 @@ def test_extraer_o_detectar_botones_sin_botones():
     assert limpio == texto
     assert botones == []
 
+
+def test_saludo_inicial_con_pitch_nunca_produce_botones():
+    texto = (
+        "¡Saludos! Te habla Carlos de LavaPass 🇩🇴. Somos la plataforma #1 para Car Washes en República Dominicana.\n\n"
+        "Te ayudamos a blindar tu negocio con membresías mensuales (facturas fijo el día 1, llueva o no ☔), "
+        "Cierre de Caja a Ciegas (cero fugas de gaveta) y liquidación de comisiones de lavadores en 10 segundos.\n\n"
+        "Para conocer mejor tu caso y recomendarte el plan ideal para tu negocio, te haré unas breves preguntas sobre tu operación:\n"
+        "Primero: **¿con quién tengo el gusto y cómo se llama tu Car Wash?** 🚗"
+    )
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert botones == [], "El saludo inicial de identificación NUNCA debe incluir botones"
+    assert "¿con quién tengo el gusto" in limpio
+
+
