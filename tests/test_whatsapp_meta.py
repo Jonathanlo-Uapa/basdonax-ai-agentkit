@@ -231,3 +231,20 @@ def test_saludo_inicial_con_pitch_nunca_produce_botones():
     assert "¿con quién tengo el gusto" in limpio
 
 
+def test_nuevo_saludo_formateado_nunca_produce_botones():
+    texto = (
+        "¡Saludos! Te habla Carlos de LavaPass 🇩🇴. Somos la plataforma #1 para Car Washes en República Dominicana.\n\n"
+        "Te ayudamos a blindar y modernizar tu operación:\n"
+        "🛡️ Cierre de Caja a Ciegas → Cero fugas en gaveta y control 24/7.\n"
+        "💳 Membresías Mensuales → Cobras fijo el día 1, llueva o no ☔.\n"
+        "⏱️ Nómina en 10 segundos → Liquidación automática de comisiones de lavadores.\n"
+        "📲 Cero equipos costosos → Control total desde cualquier celular, tablet o PC.\n\n"
+        "Para conocer tu caso y recomendarte el plan ideal para tu negocio:\n"
+        "👉 ¿Con quién tengo el gusto y cómo se llama tu Car Wash? 🚗"
+    )
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert botones == [], "El nuevo saludo formateado con features tampoco debe producir botones"
+    assert "con quién tengo el gusto" in limpio.lower()
+
+
+
