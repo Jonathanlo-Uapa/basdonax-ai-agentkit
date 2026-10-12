@@ -55,8 +55,12 @@ from ..ventas import fecha_dicha, hora_dicha
 from ..canales.adjuntos import DescriptorDeFotos, Lector, TranscriptorOpenAI
 from ..canales.base import MensajeEntrante
 from ..canales.buffer import BufferDeMensajes
-from ..canales.chatwoot import Chatwoot, tarda_en_escribir
-from ..canales.whatsapp_meta import marcar_visto_y_escribiendo, wamid_del_evento
+from ..canales.whatsapp_meta import (
+    enviar_botones,
+    extraer_o_detectar_botones,
+    marcar_visto_y_escribiendo,
+    wamid_del_evento,
+)
 from ..config import Config, ErrorDeConfiguracion
 from ..frenos import BLOQUEAR, IGNORAR, TopeDeMensajes
 from ..modelos import crear_modelo
@@ -575,8 +579,9 @@ def crear_app(
                     await algo_se_rompio(conversacion, e, CAUSA_MODELO, "modelo")
                     return
 
+                texto_limpio, botones = extraer_o_detectar_botones(respuesta.texto)
                 mensajes = partir_respuesta(
-                    respuesta.texto, maximo=config.mensajes_por_respuesta
+                    texto_limpio, maximo=config.mensajes_por_respuesta
                 )
                 if not mensajes:
                     # Una respuesta vacía también es una falla: sin esto, la
@@ -594,17 +599,73 @@ def crear_app(
                 if await ya_no_le_toca(conversacion):
                     return
 
-                try:
-                    await asyncio.to_thread(
-                        canal.enviar,
-                        conversacion,
-                        mensajes,
-                        (lambda: visto_y_escribiendo(conversacion)) if con_meta else None,
-                        tarda_en_escribir if config.pausa_entre_globos else None,
+                tel_destino = ""
+                if con_meta and botones:
+                    try:
+                        tel_destino = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    except Exception:
+                        pass
+
+                if con_meta and botones and tel_destino:
+                    previos = [m for m in mensajes[:-1] if m.strip()]
+                    if previos:
+                        try:
+                            await asyncio.to_thread(
+                                canal.enviar,
+                                conversacion,
+                                previos,
+                                (lambda: visto_y_escribiendo(conversacion)),
+                                tarda_en_escribir if config.pausa_entre_globos else None,
+                            )
+                        except Exception as e:
+                            await algo_se_rompio(conversacion, e, CAUSA_CHATWOOT, "envio")
+                            return
+                        if config.pausa_entre_globos:
+                            await asyncio.sleep(1.0)
+
+                    ultimo_globo = mensajes[-1]
+                    exito_meta = await asyncio.to_thread(
+                        enviar_botones,
+                        tel_destino,
+                        ultimo_globo,
+                        botones,
+                        config.whatsapp_token,
+                        config.whatsapp_phone_number_id,
                     )
-                except Exception as e:
-                    await algo_se_rompio(conversacion, e, CAUSA_CHATWOOT, "envio")
-                    return
+
+                    if exito_meta:
+                        opciones_str = " | ".join(b[1] for b in botones)
+                        nota_chat = f"{ultimo_globo}\n\n[Botones WhatsApp: {opciones_str}]"
+                        try:
+                            await asyncio.to_thread(canal.nota_interna, conversacion, nota_chat)
+                        except Exception as e:
+                            registro.warning("[%s] no se pudo guardar nota interna de botones: %s", conversacion, e)
+                    else:
+                        try:
+                            await asyncio.to_thread(
+                                canal.enviar,
+                                conversacion,
+                                [ultimo_globo],
+                                (lambda: visto_y_escribiendo(conversacion)),
+                                None,
+                            )
+                        except Exception as e:
+                            await algo_se_rompio(conversacion, e, CAUSA_CHATWOOT, "envio")
+                            return
+                else:
+                    if botones and not con_meta:
+                        mensajes[-1] = mensajes[-1] + "\n" + "\n".join(f"• {b[1]}" for b in botones)
+                    try:
+                        await asyncio.to_thread(
+                            canal.enviar,
+                            conversacion,
+                            mensajes,
+                            (lambda: visto_y_escribiendo(conversacion)) if con_meta else None,
+                            tarda_en_escribir if config.pausa_entre_globos else None,
+                        )
+                    except Exception as e:
+                        await algo_se_rompio(conversacion, e, CAUSA_CHATWOOT, "envio")
+                        return
 
                 registro.info("[%s] -> %s mensaje(s)", conversacion, len(mensajes))
 

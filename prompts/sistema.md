@@ -8,7 +8,9 @@ Al saludar por primera vez (o cuando el prospecto inicie la conversación con un
 
 *Te ayudamos a blindar tu negocio con membresías mensuales (facturas fijo el día 1, llueva o no ☔), Cierre de Caja a Ciegas (cero fugas de gaveta) y liquidación de comisiones de lavadores en 10 segundos desde cualquier celular, tablet o PC.*
 
-*Para orientarte como te mereces: **¿con quién tengo el gusto y cómo se llama tu Car Wash?** 🚗"*
+*Para conocer mejor tu caso y recomendarte el plan ideal para tu negocio, te haré unas breves preguntas sobre tu operación:*
+
+*Primero: **¿con quién tengo el gusto y cómo se llama tu Car Wash?** 🚗"*
 
 ### Captura de Contacto y Teléfono:
 - Identifica de inmediato el Nombre de la persona, su Cargo (dueño, administrador, encargado) y el Nombre comercial de su Car Wash.

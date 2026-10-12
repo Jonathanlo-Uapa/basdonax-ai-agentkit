@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import ssl
 import urllib.request
 
 registro = logging.getLogger("agente.whatsapp")
 
-VERSION_DE_LA_API = "v26.0"
+VERSION_DE_LA_API = "v21.0"
 ESPERA = 10
 
 
@@ -206,3 +207,175 @@ def enviar_lista(
     except Exception as e:
         registro.info("no salió la lista a %s: %s", numero_destino, type(e).__name__)
         return False
+
+
+def _limpiar_frases_prohibidas(texto: str) -> str:
+    """Elimina frases feas o desalineadas como 'solo respóndeme con el número' o 'para orientarte mejor, dime:'."""
+    if not isinstance(texto, str):
+        return ""
+    lineas = []
+    for l in texto.splitlines():
+        l_strip = l.strip()
+        l_lower = l_strip.lower()
+        if (
+            "solo respóndeme con el número" in l_lower
+            or "solo respondeme con el numero" in l_lower
+            or "respóndeme con el número" in l_lower
+            or "respondeme con el numero" in l_lower
+            or "mándame el número" in l_lower
+            or "mandame el numero" in l_lower
+            or "solo responde con el número" in l_lower
+            or "solo responde con el numero" in l_lower
+            or "responde con el número" in l_lower
+            or "responde con el numero" in l_lower
+            or "para orientarte mejor, dime:" in l_lower
+            or "para orientarte mejor:" in l_lower
+        ):
+            continue
+        lineas.append(l)
+    texto_res = "\n".join(lineas)
+    texto_res = re.sub(
+        r"(?i)para orientarte mejor,\s*dime:?",
+        "Para conocer mejor tu caso y recomendarte el plan ideal para tu negocio:",
+        texto_res,
+    )
+    texto_res = re.sub(r"\n{3,}", "\n\n", texto_res)
+    return texto_res.strip()
+
+
+def extraer_o_detectar_botones(texto: str) -> tuple[str, list[tuple[str, str]]]:
+    """Extrae o detecta si el texto contiene opciones para botones interactivos de WhatsApp.
+
+    Busca etiquetas explícitas [BOTONES: opt1 | opt2 | opt3], listas numeradas o
+    detecta semánticamente los bloques de calificación clave (rol, sucursales,
+    estaciones, dolor, acción demo).
+    Limpia del texto las frases de relleno y las listas de opciones para que el
+    mensaje de WhatsApp quede con prosa limpia y botones nativos.
+
+    Devuelve (texto_limpio, lista_de_botones). Si no hay botones, devuelve (texto, []).
+    Cada botón es una tupla (id, titulo), con título recortado a 20 caracteres (límite de Meta).
+    """
+    if not isinstance(texto, str) or not texto.strip():
+        return "", []
+
+    # 1. ¿Viene etiqueta explícita [BOTONES: ...]?
+    match_tag = re.search(r"\[BOTONES?:\s*([^\]]+)\]", texto, re.IGNORECASE)
+    if match_tag:
+        raw_opts = match_tag.group(1).strip()
+        texto_limpio = re.sub(r"\[BOTONES?:\s*[^\]]+\]", "", texto, flags=re.IGNORECASE).strip()
+        partes = [p.strip() for p in raw_opts.split("|") if p.strip()]
+        if len(partes) == 1 and "," in partes[0]:
+            partes = [p.strip() for p in partes[0].split(",") if p.strip()]
+        botones = [
+            (f"btn_{i}", p[:20].strip())
+            for i, p in enumerate(partes[:3], start=1)
+            if p[:20].strip()
+        ]
+        if botones:
+            texto_limpio = _limpiar_frases_prohibidas(texto_limpio)
+            return texto_limpio, botones
+
+    # 2. ¿Viene una lista de 2 o 3 opciones numeradas o con viñetas en el texto?
+    patron_lineas = re.compile(
+        r"^[ \t]*(?:[1-3]️⃣?|[\*•\-])[ \t\.\-\)]+([^\n\r]+)$",
+        re.MULTILINE,
+    )
+    lineas = patron_lineas.findall(texto)
+    if 2 <= len(lineas) <= 3:
+        botones = [
+            (f"btn_{i}", l.strip()[:20])
+            for i, l in enumerate(lineas, start=1)
+            if l.strip()[:20]
+        ]
+        texto_limpio = patron_lineas.sub("", texto)
+        texto_limpio = _limpiar_frases_prohibidas(texto_limpio)
+        return texto_limpio.strip(), botones
+
+    # 3. Detección semántica de preguntas de calificación estándar
+    texto_b = texto.lower()
+
+    # Bloque: Rol en el negocio
+    if ("rol" in texto_b or "cargo" in texto_b or "puesto" in texto_b) and (
+        "dueño" in texto_b or "administrador" in texto_b or "encargado" in texto_b
+    ):
+        botones = [
+            ("rol_dueno", "👑 Dueño"),
+            ("rol_admin", "💼 Administrador"),
+            ("rol_encargado", "🔧 Encargado"),
+        ]
+        texto_limpio = _limpiar_frases_prohibidas(texto)
+        return texto_limpio, botones
+
+    # Bloque: Sucursales
+    if (
+        "cuántas sucursales" in texto_b
+        or "cuantas sucursales" in texto_b
+        or "cuántas sedes" in texto_b
+        or "cuantas sedes" in texto_b
+        or "cuántos locales" in texto_b
+        or "cuantos locales" in texto_b
+    ):
+        botones = [
+            ("suc_1", "1️⃣ 1 Sucursal"),
+            ("suc_2_3", "🏢 2 a 3 Sedes"),
+            ("suc_4_mas", "🌐 4 o más"),
+        ]
+        texto_limpio = _limpiar_frases_prohibidas(texto)
+        return texto_limpio, botones
+
+    # Bloque: Estaciones de lavado
+    if (
+        "cuántas estaciones" in texto_b
+        or "cuantas estaciones" in texto_b
+        or "puestos de lavado" in texto_b
+        or "estaciones de lavado" in texto_b
+    ):
+        botones = [
+            ("est_1_2", "🚗 1-2 Estaciones"),
+            ("est_3_5", "🚙 3-5 Estaciones"),
+            ("est_6_mas", "🚀 6 o más"),
+        ]
+        texto_limpio = _limpiar_frases_prohibidas(texto)
+        return texto_limpio, botones
+
+    # Bloque: Dolor principal
+    if (
+        "dolor" in texto_b
+        or "desafío" in texto_b
+        or "desafio" in texto_b
+        or "cuesta más dinero" in texto_b
+        or "cuesta mas dinero" in texto_b
+        or "quita más tiempo" in texto_b
+        or "quita mas tiempo" in texto_b
+        or "fuga" in texto_b
+    ) and (
+        "caja" in texto_b or "gaveta" in texto_b or "comisiones" in texto_b or "lluvia" in texto_b
+    ):
+        botones = [
+            ("dolor_caja", "💰 Cuadre de caja"),
+            ("dolor_nomina", "👥 Comisiones"),
+            ("dolor_lluvia", "☔ Días de lluvia"),
+        ]
+        texto_limpio = _limpiar_frases_prohibidas(texto)
+        return texto_limpio, botones
+
+    # Bloque: Cierre o propuesta de Demo / Walkthrough
+    if (
+        "¿te la agendo yo o" in texto_b
+        or "te la agendo yo o" in texto_b
+        or "cuál de esos te sirve" in texto_b
+        or "cual de esos te sirve" in texto_b
+        or "cuál te queda mejor" in texto_b
+        or "cual te queda mejor" in texto_b
+        or "videollamada de bienvenida" in texto_b
+    ):
+        botones = [
+            ("accion_demo", "📅 Agendar Demo"),
+            ("accion_trial", "🚀 Probar 7 Días"),
+            ("accion_asesor", "👤 Hablar Asesor"),
+        ]
+        texto_limpio = _limpiar_frases_prohibidas(texto)
+        return texto_limpio, botones
+
+    # Sin botones detectados
+    return _limpiar_frases_prohibidas(texto), []

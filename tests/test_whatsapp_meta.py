@@ -14,6 +14,7 @@ from agente.canales import whatsapp_meta  # noqa: E402
 from agente.canales.whatsapp_meta import (  # noqa: E402
     enviar_botones,
     enviar_lista,
+    extraer_o_detectar_botones,
     marcar_visto_y_escribiendo,
     wamid_del_evento,
 )
@@ -149,3 +150,70 @@ def test_falla_de_red_no_levanta_excepcion(monkeypatch):
         numero_id="123",
     )
     assert ok is False
+
+
+def test_extraer_o_detectar_botones_con_tag():
+    texto = "Para conocer mejor tu caso:\n¿Cuál es tu rol?\n[BOTONES: 👑 Dueño | 💼 Administrador | 🔧 Encargado]"
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert "[BOTONES" not in limpio
+    assert "¿Cuál es tu rol?" in limpio
+    assert len(botones) == 3
+    assert botones[0] == ("btn_1", "👑 Dueño")
+    assert botones[1] == ("btn_2", "💼 Administrador")
+    assert botones[2] == ("btn_3", "🔧 Encargado")
+
+
+def test_extraer_o_detectar_botones_limpia_numeros_y_frases_prohibidas():
+    texto = (
+        "Para orientarte mejor, dime:\n"
+        "¿Cuál es tu rol en el negocio?\n"
+        "1️⃣ Dueño\n"
+        "2️⃣ Administrador\n"
+        "3️⃣ Encargado\n"
+        "Solo respóndeme con el número 👌"
+    )
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert "Solo respóndeme con el número" not in limpio
+    assert "Para orientarte mejor" not in limpio
+    assert "1️⃣" not in limpio
+    assert len(botones) == 3
+    assert botones[0] == ("btn_1", "Dueño")
+    assert botones[1] == ("btn_2", "Administrador")
+    assert botones[2] == ("btn_3", "Encargado")
+
+
+def test_extraer_o_detectar_botones_semantica_sucursales():
+    texto = "¿Cuántas sucursales de Car Wash operas actualmente?"
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert limpio == texto
+    assert len(botones) == 3
+    assert botones[0][1] == "1️⃣ 1 Sucursal"
+    assert botones[1][1] == "🏢 2 a 3 Sedes"
+    assert botones[2][1] == "🌐 4 o más"
+
+
+def test_extraer_o_detectar_botones_semantica_estaciones():
+    texto = "¿Cuántas estaciones de lavado operativas manejas?"
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert limpio == texto
+    assert len(botones) == 3
+    assert botones[0][1] == "🚗 1-2 Estaciones"
+    assert botones[1][1] == "🚙 3-5 Estaciones"
+    assert botones[2][1] == "🚀 6 o más"
+
+
+def test_extraer_o_detectar_botones_semantica_dolor():
+    texto = "¿Cuál es el dolor o desafío que más te cuesta hoy en caja o comisiones?"
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert len(botones) == 3
+    assert botones[0][1] == "💰 Cuadre de caja"
+    assert botones[1][1] == "👥 Comisiones"
+    assert botones[2][1] == "☔ Días de lluvia"
+
+
+def test_extraer_o_detectar_botones_sin_botones():
+    texto = "¡Hola! Con mucho gusto te atiendo. ¿Con quién tengo el gusto?"
+    limpio, botones = extraer_o_detectar_botones(texto)
+    assert limpio == texto
+    assert botones == []
+
