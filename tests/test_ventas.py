@@ -191,7 +191,7 @@ def test_puntaje_lo_calcula_la_herramienta_y_no_el_modelo():
     assert guardado["lead_score"] == 50
     assert guardado["lead_ruta"] == "prueba"
     assert guardado["lead_banda"] == "tibio"
-    assert guardado["etapa_embudo"] == "diagnosticado", "la prueba no adelanta a calificado"
+    assert guardado["etapa_embudo"] == "2_lead_diagnosticado", "la prueba no adelanta a calificado"
     assert "prueba de 7 días" in texto
     assert "Jonathan Lopez" in texto
 
@@ -206,7 +206,7 @@ def test_puntaje_se_suma_con_lo_que_ya_estaba_guardado():
     assert guardado["rol"] == "dueno"
     assert guardado["lead_score"] == 68
     assert guardado["lead_ruta"] == "demo", "Dueño con operación y dolor califica a demo"
-    assert guardado["etapa_embudo"] == "calificado"
+    assert guardado["etapa_embudo"] == "3_lead_calificado"
     assert "Califica para la demo" in texto
 
 
@@ -217,7 +217,7 @@ def test_ruta_dueño_grande_sí_va_a_demo():
     guardado = ctx.canal.datos["55"]
     assert guardado["lead_score"] == 65
     assert guardado["lead_ruta"] == "demo"
-    assert guardado["etapa_embudo"] == "calificado"
+    assert guardado["etapa_embudo"] == "3_lead_calificado"
     assert "Califica para la demo" in texto
 
 
@@ -238,17 +238,17 @@ def test_ruta_encargado_con_dolor_va_a_prueba_y_pide_al_dueño():
 def test_puntaje_el_modelo_no_puede_marcar_una_demo_que_no_existe():
     ctx = contexto()
     sync(ctx, rol="dueno", sucursales_count=3, etapa_embudo="demo_agendada")
-    assert ctx.canal.datos["55"]["etapa_embudo"] == "demo_propuesta"
+    assert ctx.canal.datos["55"]["etapa_embudo"] == "4_demo_propuesta"
 
 
 def test_puntaje_la_etapa_no_vuelve_para_atras_salvo_descartar():
     ctx = contexto()
     sync(ctx, rol="dueno", sucursales_count=3, etapa_embudo="demo_propuesta")
     sync(ctx, lead_name="Ana", etapa_embudo="nuevo_lead")
-    assert ctx.canal.datos["55"]["etapa_embudo"] == "demo_propuesta"
+    assert ctx.canal.datos["55"]["etapa_embudo"] == "4_demo_propuesta"
 
     sync(ctx, etapa_embudo="descartado")
-    assert ctx.canal.datos["55"]["etapa_embudo"] == "descartado"
+    assert ctx.canal.datos["55"]["etapa_embudo"] == "8_descartado"
 
 
 def test_puntaje_un_valor_que_no_existe_vuelve_como_texto():
@@ -301,7 +301,7 @@ def test_ruta_particular_se_descarta_en_el_crm():
     texto = sync(ctx, rol="dueno", sucursales_count=3, segmento="particular")
     guardado = ctx.canal.datos["55"]
     assert guardado["lead_ruta"] == "descartar"
-    assert guardado["etapa_embudo"] == "descartado"
+    assert guardado["etapa_embudo"] == "8_descartado"
     assert "No es un prospecto de negocio" in texto
 
 
@@ -429,7 +429,7 @@ def test_reserva_queda_anotada_en_chatwoot():
     guardado = ctx.canal.datos["55"]
     assert guardado["demo_uid"] == "uid-1"
     assert guardado["demo_inicio"] == SABADO_9.isoformat()
-    assert guardado["etapa_embudo"] == "demo_agendada"
+    assert guardado["etapa_embudo"] == "5_demo_agendada"
     assert "sábado 10 de octubre a las 9:00 a. m." in texto
     assert ctx.pedidos == []
 
@@ -522,3 +522,39 @@ def test_reserva_de_alto_valor_pide_pasarlo_a_una_persona():
 def test_las_herramientas_de_ventas_estan_en_la_lista_que_mira_el_grafo():
     nombres = {h.name for h in HERRAMIENTAS}
     assert {"sync_prospecto_chatwoot", "verificar_disponibilidad_demo", "confirmar_reserva_demo"} <= nombres
+
+
+def test_normalizar_etapa():
+    from agente.ventas import normalizar_etapa
+    assert normalizar_etapa("nuevo_lead") == "1_lead_nuevo"
+    assert normalizar_etapa("diagnosticado") == "2_lead_diagnosticado"
+    assert normalizar_etapa("calificado") == "3_lead_calificado"
+    assert normalizar_etapa("demo_propuesta") == "4_demo_propuesta"
+    assert normalizar_etapa("demo_agendada") == "5_demo_agendada"
+    assert normalizar_etapa("descartado") == "8_descartado"
+    assert normalizar_etapa("1_lead_nuevo") == "1_lead_nuevo"
+    assert normalizar_etapa(None) == "1_lead_nuevo"
+
+
+def test_multi_tags_de():
+    from agente.ventas import multi_tags_de
+
+    # Caso 1: Cadena multisucursal + alta escala + hot lead + dolor caja
+    tags1 = multi_tags_de(sucursales=3, estaciones=10, dolor="caja_ciega", puntos=85)
+    assert set(tags1) == {"multisucursal", "alta_escala", "hot_lead", "dolor_caja"}
+
+    # Caso 2: Prospecto fiscal DGII
+    tags2 = multi_tags_de(sucursales=1, estaciones=4, dolor="dgii_fiscal", puntos=65)
+    assert set(tags2) == {"dgii_fiscal"}
+
+    # Caso 3: Dolor nómina sábado
+    tags3 = multi_tags_de(sucursales=1, estaciones=2, dolor="nomina_sabado", puntos=50)
+    assert set(tags3) == {"dolor_nomina"}
+
+    # Caso 4: Dolor seguro lluvia
+    tags4 = multi_tags_de(sucursales=1, estaciones=2, dolor="seguro_lluvia", puntos=50)
+    assert set(tags4) == {"dolor_lluvia"}
+
+    # Caso 5: Pasando diccionario
+    tags5 = multi_tags_de({"sucursales": 2, "estaciones": 8, "dolor_principal": "fuga_efectivo", "lead_score": 78})
+    assert set(tags5) == {"multisucursal", "alta_escala", "hot_lead", "dolor_caja"}

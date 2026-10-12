@@ -422,6 +422,87 @@ class Chatwoot(Canal):
             {"content": texto.strip(), "message_type": "outgoing", "private": True},
         )
 
+    def reemplazar_etapa(self, conversacion: str, nueva_etapa: str) -> None:
+        """Reemplaza la etapa actual del embudo por la nueva, preservando el resto de etiquetas.
+
+        Las etapas tienen prefijo numérico ('1_lead_nuevo', '2_lead_diagnosticado', etc.).
+        Cualquier etiqueta que coincida con una etapa previa es removida para que la conversación
+        siempre refleje únicamente la etapa actual, manteniendo intactas etiquetas como 'humano',
+        'multisucursal', 'hot_lead', etc.
+        """
+        nueva_etapa = (nueva_etapa or "").strip().lower()
+        if not nueva_etapa:
+            return
+
+        respuesta = self._api("GET", f"conversations/{conversacion}/labels")
+        etiquetas_actuales = [str(e) for e in respuesta.get("payload") or []]
+
+        def es_etapa(et: str) -> bool:
+            e_limpia = et.strip().lower()
+            return len(e_limpia) >= 2 and e_limpia[0].isdigit() and e_limpia[1] == "_"
+
+        otras = [e for e in etiquetas_actuales if not es_etapa(e)]
+        nuevas = otras + [nueva_etapa]
+
+        # Si ya tiene exactamente estas etiquetas, evitamos un POST innecesario
+        if set(e.strip().lower() for e in etiquetas_actuales) == set(e.strip().lower() for e in nuevas):
+            return
+
+        self._api(
+            "POST",
+            f"conversations/{conversacion}/labels",
+            {"labels": nuevas},
+        )
+
+    def contacto_id_de(self, conversacion: str) -> str:
+        """El id del contacto dueño de la conversación en Chatwoot."""
+        datos = self._api("GET", f"conversations/{conversacion}")
+        remitente = (datos.get("meta") or {}).get("sender") or {}
+        cid = remitente.get("id") if isinstance(remitente, dict) else ""
+        return str(cid or "").strip()
+
+    def actualizar_contacto(
+        self,
+        contacto_id: str,
+        nombre: str | None = None,
+        telefono: str | None = None,
+        atributos: dict | None = None,
+    ) -> dict:
+        """Actualiza el nombre, teléfono y atributos personalizados de la ficha de contacto."""
+        contacto_id = str(contacto_id or "").strip()
+        if not contacto_id:
+            return {}
+
+        cuerpo: dict = {}
+        if nombre and str(nombre).strip():
+            cuerpo["name"] = str(nombre).strip()
+        if telefono and str(telefono).strip():
+            cuerpo["phone_number"] = str(telefono).strip()
+
+        if atributos:
+            try:
+                existente = self._api("GET", f"contacts/{contacto_id}")
+                actuales = (existente.get("payload") or {}).get("custom_attributes") or {}
+                if not isinstance(actuales, dict):
+                    actuales = {}
+            except Exception:
+                actuales = {}
+            cuerpo["custom_attributes"] = {**actuales, **atributos}
+
+        if not cuerpo:
+            return {}
+
+        res = self._api("PUT", f"contacts/{contacto_id}", cuerpo)
+        return (res.get("payload") or {}) if isinstance(res, dict) else {}
+
+    def nota_de_contacto(self, contacto_id: str, texto: str) -> None:
+        """Guarda una nota permanente en la ficha del contacto (no en la conversación)."""
+        contacto_id = str(contacto_id or "").strip()
+        texto = str(texto or "").strip()
+        if not contacto_id or not texto:
+            return
+        self._api("POST", f"contacts/{contacto_id}/notes", {"content": texto})
+
 
 
     # -- Los datos del prospecto (las herramientas de ventas) ------------------

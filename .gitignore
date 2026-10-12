@@ -50,3 +50,8 @@ _vista-previa.html
 respaldos-n8n/
 # El código propio de una Format Chain que se saca para agregarle la elección
 format_chain_propia.js
+
+# Antigravity y skills locales
+.agents/
+.unlazy/
+skills-lock.json

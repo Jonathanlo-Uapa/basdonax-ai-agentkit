@@ -28,15 +28,71 @@ URGENCIAS = ("esta_semana", "este_mes", "explorando")
 RUTAS = ("diagnosticar", "prueba", "demo", "descartar")
 BANDAS = ("frio", "tibio", "caliente", "prioridad")
 ETAPAS = (
-    "nuevo_lead",
-    "diagnosticado",
-    "calificado",
-    "demo_propuesta",
-    "demo_agendada",
-    "descartado",
+    "1_lead_nuevo",
+    "2_lead_diagnosticado",
+    "3_lead_calificado",
+    "4_demo_propuesta",
+    "5_demo_agendada",
+    "6_free_trial_activo",
+    "7_cerrado_ganado",
+    "8_descartado",
 )
+MAPA_ETAPAS_LEGACY = {
+    "nuevo_lead": "1_lead_nuevo",
+    "diagnosticado": "2_lead_diagnosticado",
+    "calificado": "3_lead_calificado",
+    "demo_propuesta": "4_demo_propuesta",
+    "demo_agendada": "5_demo_agendada",
+    "free_trial_activo": "6_free_trial_activo",
+    "cerrado_ganado": "7_cerrado_ganado",
+    "descartado": "8_descartado",
+}
 FRANJAS = ("manana", "tarde", "noche", "cualquiera")
 QUIEN_DECIDE = ("dueno", "administrador")
+
+def normalizar_etapa(etapa: str | None) -> str:
+    """Traduce etapas legacy al nuevo formato de 8 etapas con prefijo numérico."""
+    if not etapa:
+        return "1_lead_nuevo"
+    limpia = str(etapa).strip().lower()
+    return MAPA_ETAPAS_LEGACY.get(limpia, limpia)
+
+def multi_tags_de(
+    datos_o_sucursales: dict | int = 0,
+    estaciones: int = 0,
+    dolor: str = "",
+    puntos: int = 0,
+    **kwargs,
+) -> list[str]:
+    """Calcula las etiquetas complementarias de segmentación del prospecto."""
+    if isinstance(datos_o_sucursales, dict):
+        d = datos_o_sucursales
+        sucursales = entero(d.get("sucursales"))
+        estaciones = entero(d.get("estaciones"))
+        dolor = str(d.get("dolor") or d.get("dolor_principal") or "").strip().lower()
+        puntos = entero(d.get("puntos") or d.get("lead_score") or d.get("puntaje"))
+    else:
+        sucursales = entero(kwargs.get("sucursales", datos_o_sucursales))
+        estaciones = entero(kwargs.get("estaciones", estaciones))
+        dolor = str(kwargs.get("dolor", dolor) or "").strip().lower()
+        puntos = entero(kwargs.get("puntos", puntos))
+
+    tags: list[str] = []
+    if sucursales > 1:
+        tags.append("multisucursal")
+    if estaciones >= 8:
+        tags.append("alta_escala")
+    if puntos >= 75:
+        tags.append("hot_lead")
+    if dolor == "dgii_fiscal":
+        tags.append("dgii_fiscal")
+    elif dolor in ("caja_ciega", "fuga_efectivo"):
+        tags.append("dolor_caja")
+    elif dolor == "nomina_sabado":
+        tags.append("dolor_nomina")
+    elif dolor == "seguro_lluvia":
+        tags.append("dolor_lluvia")
+    return tags
 
 # Prueba de 7 días (PRO). La demo y walkthrough con Jonathan pide 55 o tamaño MAX/Enterprise o dolor DGII.
 UMBRAL_PRUEBA = 50

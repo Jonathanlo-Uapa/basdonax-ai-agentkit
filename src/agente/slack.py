@@ -116,6 +116,75 @@ class NotificadorSlack:
         )
         return self._enviar(texto, color="#ECB22E")
 
+    def notificar_intencion_demo(
+        self,
+        *,
+        nombre: str,
+        telefono: str,
+        car_wash: str = "",
+        score: int = 0,
+        chatwoot_url: str = "",
+    ) -> bool:
+        """Avisa que un prospecto solicitó horarios de demo / walkthrough."""
+        contacto = nombre or "Sin nombre"
+        tel = telefono or "Sin número"
+        negocio = f" ({car_wash})" if car_wash else ""
+        texto = (
+            "🎯 *Intención de Demo Detectada (Horarios Solicitados)*\n"
+            f"• *Prospecto:* {contacto}{negocio} ({tel})\n"
+            f"• *Lead Score:* {score} pts\n"
+            f"• *Estado:* Carlos presentó horarios libres de Cal.com\n"
+            f"• *Conversación:* <{chatwoot_url}|Abrir en Chatwoot>" if chatwoot_url else
+            f"• *Conversación:* Chatwoot"
+        )
+        return self._enviar(texto, color="#8B5CF6")
+
+    def notificar_lead_calificado(
+        self,
+        *,
+        nombre: str,
+        telefono: str,
+        car_wash: str = "",
+        score: int = 0,
+        estaciones: int = 1,
+        chatwoot_url: str = "",
+    ) -> bool:
+        """Avisa de un lead de alta calificación o decisor prioritario."""
+        contacto = nombre or "Sin nombre"
+        tel = telefono or "Sin número"
+        negocio = f" ({car_wash})" if car_wash else ""
+        texto = (
+            "🔥 *Lead Calificado / Hot Lead Detectado*\n"
+            f"• *Prospecto:* {contacto}{negocio} ({tel})\n"
+            f"• *Lead Score:* {score}/100 pts\n"
+            f"• *Operación:* {estaciones} estaciones\n"
+            f"• *Conversación:* <{chatwoot_url}|Abrir en Chatwoot>" if chatwoot_url else
+            f"• *Conversación:* Chatwoot"
+        )
+        return self._enviar(texto, color="#2563EB")
+
+    def notificar_minuta_demo(
+        self,
+        *,
+        nombre: str,
+        car_wash: str = "",
+        resumen: str = "",
+        siguiente_paso: str = "",
+        chatwoot_url: str = "",
+    ) -> bool:
+        """Avisa que se registró la minuta ejecutiva de una videollamada."""
+        contacto = nombre or "Sin nombre"
+        negocio = f" ({car_wash})" if car_wash else ""
+        texto = (
+            "📝 *Minuta de Google Meet Registrada*\n"
+            f"• *Cliente:* {contacto}{negocio}\n"
+            f"• *Resumen:* {resumen}\n"
+            f"• *Siguiente paso:* {siguiente_paso or 'Seguimiento comercial'}\n"
+            f"• *Ficha CRM:* <{chatwoot_url}|Ver en Chatwoot>" if chatwoot_url else
+            f"• *Ficha CRM:* Chatwoot"
+        )
+        return self._enviar(texto, color="#059669")
+
     def _enviar(self, texto: str, color: str = "#4A154B") -> bool:
         """Construye la carga útil y la despacha al webhook de Slack."""
         if not self.activo:

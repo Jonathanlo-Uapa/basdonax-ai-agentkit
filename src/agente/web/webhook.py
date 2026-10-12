@@ -679,6 +679,55 @@ def crear_app(
                                 chatwoot_url=canal.enlace(conversacion),
                             )
 
+                # 3. ¿Intención de Demo (horarios solicitados / etapa 4_demo_propuesta)?
+                if (
+                    attrs_despues.get("etapa_embudo") in ("4_demo_propuesta", "demo_propuesta")
+                    and attrs_antes.get("etapa_embudo") not in ("4_demo_propuesta", "demo_propuesta")
+                    and not attrs_despues.get("intencion_demo_avisada")
+                ):
+                    try:
+                        await asyncio.to_thread(
+                            canal.guardar_atributos, conversacion, {"intencion_demo_avisada": True}
+                        )
+                    except Exception:
+                        pass
+                    registro.info("[%s] intención de demo detectada: aviso a Slack", conversacion)
+                    if slack.activo:
+                        await asyncio.to_thread(
+                            slack.notificar_intencion_demo,
+                            nombre=nombre,
+                            telefono=tel,
+                            car_wash=str(attrs_despues.get("negocio_nombre") or ""),
+                            score=int(attrs_despues.get("lead_score") or 0),
+                            chatwoot_url=canal.enlace(conversacion),
+                        )
+
+                # 4. ¿Lead calificado / Hot Lead (score >= 75 o decisor calificado)?
+                score_actual = int(attrs_despues.get("lead_score") or 0)
+                if (
+                    (score_actual >= 75 or attrs_despues.get("etapa_embudo") in ("3_lead_calificado", "calificado"))
+                    and not attrs_antes.get("calificado_avisado")
+                    and not attrs_despues.get("calificado_avisado")
+                    and attrs_despues.get("etapa_embudo") not in ("8_descartado", "descartado")
+                ):
+                    try:
+                        await asyncio.to_thread(
+                            canal.guardar_atributos, conversacion, {"calificado_avisado": True}
+                        )
+                    except Exception:
+                        pass
+                    registro.info("[%s] lead calificado / hot lead: aviso a Slack", conversacion)
+                    if slack.activo:
+                        await asyncio.to_thread(
+                            slack.notificar_lead_calificado,
+                            nombre=nombre,
+                            telefono=tel,
+                            car_wash=str(attrs_despues.get("negocio_nombre") or ""),
+                            score=score_actual,
+                            estaciones=int(attrs_despues.get("estaciones") or 1),
+                            chatwoot_url=canal.enlace(conversacion),
+                        )
+
     async def algo_se_rompio(conversacion: str, error: Exception, causa: str, tipo: str) -> None:
         """El modelo o Chatwoot fallaron: el equipo se entera, el cliente no.
 
@@ -908,6 +957,101 @@ def crear_app(
         revisadas.discard(conversacion)
         registro.info("[%s] memoria borrada: arranca de cero", conversacion)
         return JSONResponse({"estado": "ok", "conversacion": conversacion})
+
+    @app.post("/minuta_demo/{token}")
+    @app.post("/minuta_demo")
+    async def minuta_demo(pedido: Request, token: str = "") -> JSONResponse:
+        """Registra la minuta de una videollamada de Google Meet.
+
+        Ingiere el resumen de la reunión, lo asocia al contacto en Chatwoot
+        (en sus Notas de Contacto permanentes), le aplica la etiqueta
+        'demo_realizada' a la conversación y despacha una tarjeta ejecutiva a Slack.
+        """
+        tok = (
+            token
+            or pedido.headers.get("x-webhook-token")
+            or str(pedido.query_params.get("token") or "")
+        ).strip()
+        if not token_valido(tok):
+            return JSONResponse({"error": "no autorizado"}, status_code=401)
+
+        cuerpo = await _leer_con_tope(pedido)
+        try:
+            datos = json.loads(cuerpo) if cuerpo else {}
+        except Exception:
+            datos = {}
+        if not isinstance(datos, dict):
+            return JSONResponse({"error": "esperaba JSON"}, status_code=400)
+
+        conversacion = str(datos.get("conversacion") or "").strip()
+        telefono = str(datos.get("telefono") or "").strip()
+        contacto_id = str(datos.get("contacto_id") or "").strip()
+        nombre = str(datos.get("contacto_nombre") or datos.get("nombre") or "Cliente").strip()
+        car_wash = str(datos.get("car_wash") or datos.get("negocio") or "").strip()
+        resumen = str(datos.get("resumen") or "").strip()
+        acuerdos = str(datos.get("acuerdos") or "").strip()
+        siguiente_paso = str(datos.get("siguiente_paso") or "").strip()
+
+        if not resumen:
+            return JSONResponse({"error": "falta 'resumen' de la llamada"}, status_code=400)
+
+        if conversacion and not contacto_id and hasattr(canal, "contacto_id_de"):
+            try:
+                contacto_id = await asyncio.to_thread(canal.contacto_id_de, conversacion)
+            except Exception:
+                pass
+
+        # Formatear la nota permanente para el Contact Profile
+        lineas_nota = [
+            "📝 MINUTA DE DEMO / GOOGLE MEET (Jonathan Lopez COO)",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"• Contacto: {nombre}" + (f" ({car_wash})" if car_wash else ""),
+        ]
+        if telefono:
+            lineas_nota.append(f"• Teléfono: {telefono}")
+        lineas_nota.append(f"\n📌 Resumen Ejecutivo:\n{resumen}")
+        if acuerdos:
+            lineas_nota.append(f"\n🤝 Acuerdos / Compromisos:\n{acuerdos}")
+        if siguiente_paso:
+            lineas_nota.append(f"\n🚀 Siguiente Paso:\n{siguiente_paso}")
+        texto_nota = "\n".join(lineas_nota)
+
+        # Guardar en Contact Notes de Chatwoot
+        if contacto_id and hasattr(canal, "nota_de_contacto"):
+            try:
+                await asyncio.to_thread(canal.nota_de_contacto, contacto_id, texto_nota)
+            except Exception as e:
+                registro.warning("No se pudo guardar la nota de contacto para %s: %s", contacto_id, e)
+
+        # Si tenemos conversación, también dejamos nota interna y sumamos 'demo_realizada'
+        if conversacion:
+            try:
+                await asyncio.to_thread(canal.nota_interna, conversacion, texto_nota)
+            except Exception:
+                pass
+            try:
+                await asyncio.to_thread(canal.sumar_etiqueta, conversacion, "demo_realizada")
+            except Exception as e:
+                registro.warning("[%s] no se pudo sumar etiqueta demo_realizada: %s", conversacion, e)
+
+        # Enviar tarjeta ejecutiva a Slack
+        if slack.activo:
+            chatwoot_url = canal.enlace(conversacion) if conversacion else ""
+            await asyncio.to_thread(
+                slack.notificar_minuta_demo,
+                nombre=nombre,
+                car_wash=car_wash,
+                resumen=resumen,
+                siguiente_paso=siguiente_paso or acuerdos,
+                chatwoot_url=chatwoot_url,
+            )
+
+        return JSONResponse({
+            "estado": "ok",
+            "mensaje": "Minuta registrada y notificada exitosamente",
+            "contacto_id": contacto_id,
+            "conversacion": conversacion,
+        })
 
     @app.post("/chatwoot/{token}")
     async def entrante(token: str, pedido: Request) -> JSONResponse:

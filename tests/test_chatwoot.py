@@ -81,6 +81,8 @@ class ChatwootFalso(Chatwoot):
         self.resueltas_del_contacto = False
         # Los datos propios de cada conversación y el teléfono de quien escribe.
         self.atributos_guardados: dict[str, dict] = {}
+        self.contactos_guardados: dict[str, dict] = {}
+        self.notas_contacto: list[dict] = []
         self.telefono = "+18095551234"
 
     def etiquetas_de(self, conversacion) -> list[str]:
@@ -101,6 +103,15 @@ class ChatwootFalso(Chatwoot):
         if partes[0] == "contacts" and partes[-1] == "conversations":
             estado = "resolved" if self.resueltas_del_contacto else "open"
             return {"payload": [{"id": 5, "status": estado}]}
+        if partes[0] == "contacts" and len(partes) == 2:
+            if metodo == "GET":
+                return {"payload": {"id": int(partes[1]), "custom_attributes": self.contactos_guardados.get(partes[1], {}).get("custom_attributes", {})}}
+            if metodo == "PUT":
+                self.contactos_guardados[partes[1]] = dict(datos or {})
+                return {"payload": {"id": int(partes[1]), **(datos or {})}}
+        if partes[0] == "contacts" and partes[-1] == "notes" and metodo == "POST":
+            self.notas_contacto.append({"contacto_id": partes[1], "content": (datos or {}).get("content")})
+            return {"id": 1, **(datos or {})}
         if metodo == "GET" and len(partes) == 2 and partes[0] == "conversations":
             return {
                 "id": int(partes[1]),
@@ -1454,7 +1465,7 @@ def test_traspaso_despues_de_reservar_pone_humano_sin_callar_la_confirmacion(mon
     assert canal.envios() == ["¡Listo! Te esperamos el sábado 10 a las 9:00 a. m. ¿Te mando el enlace por aquí?"]
     assert 0 <= posicion(canal, es_el_envio) < posicion(canal, pone("humano"))
     assert [r[2] for r in agenda.reservas] == ["+18295550000"], "el teléfono sale de Chatwoot"
-    assert canal.atributos_guardados["56"]["etapa_embudo"] == "demo_agendada"
+    assert canal.atributos_guardados["56"]["etapa_embudo"] == "5_demo_agendada"
     assert canal.atributos_guardados["56"]["negocio_nombre"] == "Lavado Max", "no se pisa lo que había"
     assert avisos.mandados[0][0] == "Una conversación de ventas pasa a una persona"
 
@@ -1517,5 +1528,72 @@ def test_demo_confirmada_deja_nota_privada_con_ficha(monkeypatch):
     assert "EcoWash" in nota
     assert "caja" in nota
     assert "Carlos" in nota
+
+
+def test_chatwoot_contacto_id_de():
+    canal = ChatwootFalso()
+    cid = canal.contacto_id_de("12")
+    assert cid == "300"
+
+
+def test_chatwoot_actualizar_contacto():
+    canal = ChatwootFalso()
+    res = canal.actualizar_contacto("300", nombre="Lorenzo Lopez", telefono="+18092357447", atributos={"cargo": "Dueño"})
+    assert canal.contactos_guardados["300"]["name"] == "Lorenzo Lopez"
+    assert canal.contactos_guardados["300"]["phone_number"] == "+18092357447"
+    assert canal.contactos_guardados["300"]["custom_attributes"]["cargo"] == "Dueño"
+
+
+def test_chatwoot_nota_de_contacto():
+    canal = ChatwootFalso()
+    canal.nota_de_contacto("300", "Nota importante de cliente")
+    assert len(canal.notas_contacto) == 1
+    assert canal.notas_contacto[0]["contacto_id"] == "300"
+    assert "Nota importante de cliente" in canal.notas_contacto[0]["content"]
+
+
+def test_chatwoot_reemplazar_etapa():
+    canal = ChatwootFalso(etiquetas_remotas=["1_lead_nuevo", "humano", "multisucursal"])
+    canal.reemplazar_etapa("12", "3_lead_calificado")
+    assert canal.etiquetas_de("12") == ["humano", "multisucursal", "3_lead_calificado"]
+
+
+def test_webhook_minuta_demo_endpoint():
+    from test_agente import agente_falso
+
+    canal = ChatwootFalso()
+    agente = agente_falso(["ok"])
+
+    with cliente(canal, agente) as web:
+        # 1. Sin token o token inválido da 401
+        res_bad = web.post("/minuta_demo/badtoken", json={"resumen": "test"})
+        assert res_bad.status_code == 401
+
+        # 2. Sin resumen da 400
+        res_no_resumen = web.post(f"/minuta_demo/{TOKEN}", json={"contacto_nombre": "Pedro"})
+        assert res_no_resumen.status_code == 400
+
+        # 3. Minuta exitosa
+        payload = {
+            "conversacion": "12",
+            "contacto_nombre": "Pedro Rodriguez",
+            "car_wash": "Pedro Auto Wash",
+            "telefono": "+18095551234",
+            "resumen": "Demostración completa de membresías y caja a ciegas. Muy satisfecho.",
+            "acuerdos": "Inicia prueba de 7 días. Requiere NCF fiscal.",
+            "siguiente_paso": "Llamada de seguimiento el viernes.",
+        }
+        res_ok = web.post(f"/minuta_demo/{TOKEN}", json=payload)
+        assert res_ok.status_code == 200
+        datos_resp = res_ok.json()
+        assert datos_resp["estado"] == "ok"
+        assert datos_resp["contacto_id"] == "300"
+
+        # Verificar que la nota de contacto se guardó
+        assert len(canal.notas_contacto) == 1
+        assert "MINUTA DE DEMO / GOOGLE MEET" in canal.notas_contacto[0]["content"]
+        assert "Pedro Rodriguez" in canal.notas_contacto[0]["content"]
+        # Verificar que la etiqueta demo_realizada se sumó
+        assert "demo_realizada" in canal.etiquetas_de("12")
 
 

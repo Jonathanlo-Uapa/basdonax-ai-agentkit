@@ -56,6 +56,8 @@ from .ventas import (
     franja_de,
     hora_dicha,
     limpiar,
+    multi_tags_de,
+    normalizar_etapa,
     puntaje,
     ruta,
     texto_desglose,
@@ -200,6 +202,8 @@ def sync_prospecto_chatwoot(
         software_actual: cuaderno, excel, otro_pos, lavapass o ninguno. Solo si lo dijo.
         urgencia: esta_semana, este_mes o explorando. Solo si lo dijo.
     """
+    etapa_embudo = normalizar_etapa(etapa_embudo)
+
     for nombre, valor, validos in (
         ("etapa_embudo", etapa_embudo, ETAPAS),
         ("rol", rol, ROLES),
@@ -211,10 +215,10 @@ def sync_prospecto_chatwoot(
         if valor is not None and valor not in validos:
             return f"{INTERNO}\n'{limpiar(str(valor), 30)}' no vale para {nombre}: elige uno de {', '.join(validos)}."
 
-    # demo_agendada la pone solo confirmar_reserva_demo, con la reserva hecha:
+    # 5_demo_agendada la pone solo confirmar_reserva_demo, con la reserva hecha:
     # si la pudiera poner el modelo, el CRM diría que hay una demo que no existe.
-    if etapa_embudo == "demo_agendada":
-        etapa_embudo = "demo_propuesta"
+    if etapa_embudo in ("demo_agendada", "5_demo_agendada"):
+        etapa_embudo = "4_demo_propuesta"
 
     nuevos = {
         "lead_nombre": limpiar(lead_name) if lead_name else None,
@@ -254,19 +258,21 @@ def sync_prospecto_chatwoot(
     # La etapa la propone el modelo, pero la ruta la corrige: calificado es
     # solo quien va a demo. Un particular se descarta. La prueba no adelanta
     # la etapa: no es Meet.
-    anterior = guardados.get("etapa_embudo")
-    if elegida == "descartar" and anterior != "demo_agendada":
-        etapa_embudo = "descartado"
-    if etapa_embudo in ("calificado", "demo_propuesta") and not calificado:
-        etapa_embudo = "diagnosticado"
-    elif etapa_embudo in ("nuevo_lead", "diagnosticado") and calificado:
-        etapa_embudo = "calificado"
-    # Y no vuelve para atrás: un "nuevo_lead" mandado de más no puede borrar
+    anterior_crudo = guardados.get("etapa_embudo")
+    anterior = normalizar_etapa(anterior_crudo) if anterior_crudo else None
+
+    if elegida == "descartar" and anterior != "5_demo_agendada":
+        etapa_embudo = "8_descartado"
+    if etapa_embudo in ("3_lead_calificado", "4_demo_propuesta") and not calificado:
+        etapa_embudo = "2_lead_diagnosticado"
+    elif etapa_embudo in ("1_lead_nuevo", "2_lead_diagnosticado") and calificado:
+        etapa_embudo = "3_lead_calificado"
+    # Y no vuelve para atrás: un "1_lead_nuevo" mandado de más no puede borrar
     # que ya se le propuso (o se le agendó) la demo. Descartar sí se puede.
     if (
-        etapa_embudo != "descartado"
+        etapa_embudo != "8_descartado"
         and anterior in ETAPAS
-        and anterior != "descartado"
+        and anterior != "8_descartado"
         and ETAPAS.index(anterior) > ETAPAS.index(etapa_embudo)
     ):
         etapa_embudo = anterior
@@ -279,12 +285,12 @@ def sync_prospecto_chatwoot(
         alto_valor=alto_valor,
     )
 
-    if etapa_embudo == "descartado" or elegida == "descartar":
+    if etapa_embudo in ("8_descartado", "descartado") or elegida == "descartar":
         paso = (
             "No es un prospecto de negocio. No ofrezcas la demo ni la prueba. "
             "Cierra con amabilidad."
         )
-    elif etapa_embudo == "demo_agendada":
+    elif etapa_embudo in ("5_demo_agendada", "demo_agendada"):
         paso = "Ya tiene la demo agendada: no la ofrezcas de nuevo. Responde sus dudas."
     elif elegida == "demo":
         paso = (
@@ -339,11 +345,77 @@ def sync_prospecto_chatwoot(
         registro.error("[%s] no se pudo guardar el prospecto: %s", contexto.conversacion, e)
         return resumen + f"\n(No se pudo guardar en el CRM: {type(e).__name__}. Sigue igual.)"
 
-    if alto_valor and not guardados.get("alto_valor_avisado") and etapa_embudo != "descartado":
+    # Actualizar contacto en Chatwoot (datos, nombre enriquecido y nota permanente)
+    if hasattr(contexto.canal, "actualizar_contacto"):
+        cid = ""
+        if hasattr(contexto.canal, "contacto_id_de"):
+            try:
+                cid = contexto.canal.contacto_id_de(contexto.conversacion)
+            except Exception:
+                pass
+
+        nombre_crm = datos.get("lead_nombre")
+        if nombre_crm and rol_dato and rol_dato != "otro":
+            nombre_crm = f"{nombre_crm} ({rol_dato.capitalize()})"
+
+        attrs_contacto = {
+            "negocio_nombre": datos.get("negocio_nombre"),
+            "cargo": rol_dato if rol_dato != "otro" else None,
+            "sucursales_count": sucursales if sucursales > 0 else None,
+            "estaciones_count": estaciones if estaciones > 0 else None,
+            "dolor_principal": dolor if dolor != "ninguno" else None,
+            "software_actual": software or None,
+            "urgencia": urgencia_dato or None,
+            "lead_score": puntos,
+            "etapa_embudo": etapa_embudo,
+        }
+        attrs_contacto = {k: v for k, v in attrs_contacto.items() if v is not None}
+
+        if cid:
+            try:
+                contexto.canal.actualizar_contacto(cid, nombre=nombre_crm, atributos=attrs_contacto)
+            except Exception as e:
+                registro.warning("[%s] no se pudo actualizar contacto en Chatwoot: %s", contexto.conversacion, e)
+
+            nota_crm = (
+                f"📋 FICHA PROSPECTO LAVAPASS\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"• Contacto: {datos.get('lead_nombre') or 'No indicado'}\n"
+                f"• Car Wash: {datos.get('negocio_nombre') or 'No indicado'}\n"
+                f"• Cargo: {rol_dato}\n"
+                f"• Sucursales: {sucursales} | Estaciones: {estaciones}\n"
+                f"• Dolor: {dolor}\n"
+                f"• Software: {software or 'No indicado'} | Urgencia: {urgencia_dato}\n"
+                f"• Lead Score: {puntos}/100 ({lead_banda})\n"
+                f"• Etapa: {etapa_embudo} | Ruta: {elegida}"
+            )
+            try:
+                contexto.canal.nota_de_contacto(cid, nota_crm)
+            except Exception as e:
+                registro.warning("[%s] no se pudo guardar nota de contacto en Chatwoot: %s", contexto.conversacion, e)
+
+    # Actualizar etiqueta de etapa única y multi-tags acumulativos en la conversación
+    if hasattr(contexto.canal, "reemplazar_etapa"):
+        try:
+            contexto.canal.reemplazar_etapa(contexto.conversacion, etapa_embudo)
+        except Exception as e:
+            registro.warning("[%s] no se pudo reemplazar etapa en Chatwoot: %s", contexto.conversacion, e)
+
+    if hasattr(contexto.canal, "sumar_etiqueta"):
+        tags = multi_tags_de(sucursales=sucursales, estaciones=estaciones, dolor=dolor, puntos=puntos)
+        for t in tags:
+            try:
+                contexto.canal.sumar_etiqueta(contexto.conversacion, t)
+            except Exception:
+                pass
+
+    if alto_valor and not guardados.get("alto_valor_avisado") and etapa_embudo not in ("8_descartado", "descartado"):
         contexto.pedir(ALTO_VALOR, _ficha(datos))
 
-    if dolor == "dgii_fiscal" and not guardados.get("dgii_avisado") and etapa_embudo != "descartado":
+    if dolor == "dgii_fiscal" and not guardados.get("dgii_avisado") and etapa_embudo not in ("8_descartado", "descartado"):
         contexto.pedir(SOLICITUD_DGII, _ficha(datos))
+
+    return resumen
 
     return resumen
 
@@ -512,9 +584,14 @@ def confirmar_reserva_demo(fecha_hora_iso: str, prospecto_nombre: str) -> str:
                 {
                     "demo_uid": reserva["uid"],
                     "demo_inicio": reserva["comienzo"].isoformat(),
-                    "etapa_embudo": "demo_agendada",
+                    "etapa_embudo": "5_demo_agendada",
                 },
             )
+            if hasattr(contexto.canal, "reemplazar_etapa"):
+                try:
+                    contexto.canal.reemplazar_etapa(conversacion, "5_demo_agendada")
+                except Exception:
+                    pass
         except Exception as e:
             # La reserva está hecha: eso no se deshace por no poder anotarla.
             # Pero sin la nota, otro intento reservaría de nuevo: lo ve el equipo.
