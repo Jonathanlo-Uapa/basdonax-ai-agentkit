@@ -146,6 +146,9 @@ class Config:
     calcom_api_key: str = field(default="", repr=False)
     calcom_event_type_id: str = ""
 
+    # -- Notificaciones 24/7 a Slack (#lavapass-ai-notifications) ---------------
+    slack_webhook_url: str = field(default="", repr=False)
+
     @classmethod
     def desde_entorno(
         cls, proveedor: str | None = None, modelo: str | None = None
@@ -284,6 +287,7 @@ class Config:
             calcom_url=calcom["url"],
             calcom_api_key=calcom["clave"],
             calcom_event_type_id=calcom["evento"],
+            slack_webhook_url=(os.getenv("SLACK_WEBHOOK_URL") or "").strip(),
         )
 
 

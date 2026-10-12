@@ -59,6 +59,7 @@ from ..config import Config, ErrorDeConfiguracion
 from ..frenos import BLOQUEAR, IGNORAR, TopeDeMensajes
 from ..modelos import crear_modelo
 from ..respuesta import partir_respuesta
+from ..slack import NotificadorSlack
 from ..traspasos import (
     A_UNA_PERSONA,
     ALTO_VALOR,
@@ -252,11 +253,12 @@ def crear_app(
     tope: TopeDeMensajes | None = None,
     lector: Lector | None = None,
     agenda: Calcom | None = None,
+    slack: NotificadorSlack | None = None,
 ) -> FastAPI:
     """Arma el servidor.
 
-    El agente, el canal, los avisos, el lector y la agenda se pueden pasar
-    armados: es lo que hacen los tests para probar todo esto sin salir a
+    El agente, el canal, los avisos, el lector, la agenda y Slack se pueden
+    pasar armados: es lo que hacen los tests para probar todo esto sin salir a
     internet, sin mandar un mail y sin gastar un token.
     """
     config = config or Config.desde_entorno()
@@ -274,6 +276,7 @@ def crear_app(
     # sería abrir una conexión nueva cada vez.
     agente = agente or Agente(config)
     avisos = avisos or Avisos.desde_config(config)
+    slack = slack or NotificadorSlack(config.slack_webhook_url)
     tope = tope or TopeDeMensajes(config.tope_mensajes_por_dia)
     lector = lector or armar_lector(config, canal)
     if agenda is None and config.calcom_api_key and config.calcom_event_type_id:
@@ -392,6 +395,22 @@ def crear_app(
                     ),
                     f"lead:{conversacion}",
                 )
+                if slack.activo:
+                    attrs = {}
+                    tel = ""
+                    try:
+                        attrs = await asyncio.to_thread(canal.atributos, conversacion)
+                        tel = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    except Exception:
+                        pass
+                    nombre = str(attrs.get("lead_nombre") or attrs.get("negocio_nombre") or "Prospecto de Alto Valor")
+                    await asyncio.to_thread(
+                        slack.notificar_free_trial,
+                        nombre=nombre,
+                        telefono=tel,
+                        score=int(attrs.get("lead_score") or 80),
+                        chatwoot_url=canal.enlace(conversacion),
+                    )
             elif pedido.tipo == SOLICITUD_DGII:
                 try:
                     await asyncio.to_thread(canal.sumar_etiqueta, conversacion, "dgii")
@@ -411,6 +430,22 @@ def crear_app(
                     f"dgii:{conversacion}",
                     para="info@lavapass.app",
                 )
+                if slack.activo:
+                    attrs = {}
+                    tel = ""
+                    try:
+                        attrs = await asyncio.to_thread(canal.atributos, conversacion)
+                        tel = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    except Exception:
+                        pass
+                    nombre = str(attrs.get("lead_nombre") or attrs.get("negocio_nombre") or "Prospecto DGII")
+                    await asyncio.to_thread(
+                        slack.notificar_dgii,
+                        nombre=nombre,
+                        telefono=tel,
+                        estaciones=attrs.get("estaciones") or 1,
+                        chatwoot_url=canal.enlace(conversacion),
+                    )
             elif pedido.tipo == A_UNA_PERSONA:
                 try:
                     await asyncio.to_thread(canal.pasar_a_persona, conversacion)
@@ -429,6 +464,19 @@ def crear_app(
                     ),
                     f"traspaso:{conversacion}",
                 )
+                if slack.activo:
+                    tel = ""
+                    try:
+                        tel = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    except Exception:
+                        pass
+                    await asyncio.to_thread(
+                        slack.notificar_traspaso,
+                        nombre="Contacto WhatsApp",
+                        telefono=tel,
+                        motivo=pedido.detalle,
+                        chatwoot_url=canal.enlace(conversacion),
+                    )
 
     async def responder(conversacion: str, texto: str) -> None:
         """Le pasa la ráfaga al agente y manda la respuesta por Chatwoot."""
@@ -459,6 +507,12 @@ def crear_app(
                 primera = config.solo_el_primer_mensaje and not await asyncio.to_thread(
                     agente.historial, conversacion
                 )
+
+                attrs_antes: dict = {}
+                try:
+                    attrs_antes = await asyncio.to_thread(canal.atributos, conversacion)
+                except Exception:
+                    pass
 
                 try:
                     respuesta = await asyncio.to_thread(pensar, contexto, texto)
@@ -512,6 +566,60 @@ def crear_app(
                 await asyncio.to_thread(canal.escribiendo, conversacion, False)
                 if contexto.pedidos:
                     await cumplir(conversacion, contexto.pedidos)
+
+                if slack.activo:
+                    attrs_despues: dict = {}
+                    tel = ""
+                    try:
+                        attrs_despues = await asyncio.to_thread(canal.atributos, conversacion)
+                        tel = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    except Exception:
+                        pass
+                    nombre = str(
+                        attrs_despues.get("lead_nombre")
+                        or attrs_despues.get("negocio_nombre")
+                        or "Prospecto de WhatsApp"
+                    )
+
+                    # 1. ¿Se agendó una demo durante este turno?
+                    if (
+                        attrs_despues.get("demo_uid")
+                        and attrs_despues.get("demo_uid") != attrs_antes.get("demo_uid")
+                    ):
+                        registro.info("[%s] demo confirmada con Jonathan Lopez: aviso a Slack", conversacion)
+                        fecha_str = str(attrs_despues.get("demo_inicio") or "Horario confirmado")
+                        await asyncio.to_thread(
+                            slack.notificar_demo,
+                            nombre=nombre,
+                            telefono=tel,
+                            fecha_hora=fecha_str,
+                            estaciones=attrs_despues.get("estaciones") or 1,
+                            dolor=str(attrs_despues.get("dolor_principal") or ""),
+                            chatwoot_url=canal.enlace(conversacion),
+                        )
+
+                    # 2. ¿Calificó para Free Trial durante este turno?
+                    if (
+                        attrs_despues.get("lead_score")
+                        and not attrs_antes.get("trial_avisado")
+                        and not attrs_despues.get("trial_avisado")
+                    ):
+                        score_val = int(attrs_despues.get("lead_score") or 0)
+                        if score_val >= 55 or attrs_despues.get("lead_ruta") in ("demo", "prueba"):
+                            try:
+                                await asyncio.to_thread(
+                                    canal.guardar_atributos, conversacion, {"trial_avisado": True}
+                                )
+                            except Exception:
+                                pass
+                            registro.info("[%s] free trial entregado: aviso a Slack", conversacion)
+                            await asyncio.to_thread(
+                                slack.notificar_free_trial,
+                                nombre=nombre,
+                                telefono=tel,
+                                score=score_val,
+                                chatwoot_url=canal.enlace(conversacion),
+                            )
 
     async def algo_se_rompio(conversacion: str, error: Exception, causa: str, tipo: str) -> None:
         """El modelo o Chatwoot fallaron: el equipo se entera, el cliente no.
