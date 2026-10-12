@@ -3,18 +3,16 @@
     python probar_calcom.py
 
 Pide los horarios libres de los próximos 14 días con CALCOM_API_KEY y
-CALCOM_EVENT_TYPE_ID, y se fija que todos caigan adentro del horario
-acordado para las demos con Adonis. Si alguno cae afuera, el horario del
-tipo de evento en Cal.com está mal configurado (o en otra zona horaria) y el
-agente lo ofrecería igual: por eso falla.
+CALCOM_EVENT_TYPE_ID, y se fija que todos caigan adentro de la ventana
+acordada para las demos y walkthroughs con Jonathan Lopez (COO). Si alguno
+cae afuera o en madrugada, avisa para revisar la zona horaria (America/Santo_Domingo).
 
-Se corre donde corre el agente (en el servidor): así prueba también que el
-servidor llega a Cal.com. Solo lee lo de Cal.com: no hace falta la clave del
+Se corre donde corre el agente (o en local): así prueba también que se
+llega a Cal.com. Solo lee lo de Cal.com: no hace falta la clave del
 modelo.
 
-El horario acordado está escrito acá y en ningún otro lado del agente, a
-propósito: el agente le cree a Cal.com. Si el horario cambia, se cambia en
-Cal.com y en esta lista, y este script avisa si quedaron distintos.
+El agente le cree a Cal.com. La disponibilidad se configura directamente
+en la cuenta de Cal.com (Availability).
 """
 
 from __future__ import annotations
