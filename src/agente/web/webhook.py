@@ -55,6 +55,7 @@ from ..ventas import fecha_dicha, hora_dicha
 from ..canales.adjuntos import DescriptorDeFotos, Lector, TranscriptorOpenAI
 from ..canales.base import MensajeEntrante
 from ..canales.buffer import BufferDeMensajes
+from ..canales.chatwoot import Chatwoot, tarda_en_escribir
 from ..canales.whatsapp_meta import (
     enviar_botones,
     extraer_o_detectar_botones,
