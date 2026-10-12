@@ -39,10 +39,13 @@ Lo que importa acá es qué hace cada uno:
 | Archivo | Qué resuelve |
 |---|---|
 | `agente.py` | **El agente.** El grafo de LangGraph. Empezá por acá. |
-| `herramientas.py` | Lo que el agente puede hacer además de conversar. Hoy: el clima. |
+| `herramientas.py` | Lo que el agente puede hacer además de conversar: el clima, y las tres de ventas de LavaPass (`sync_prospecto_chatwoot`, `verificar_disponibilidad_demo`, `confirmar_reserva_demo`) |
+| `ventas.py` | Las reglas del embudo sin red ni modelo: el puntaje, la ruta (diagnosticar / prueba / demo / descartar), quién es de alto valor y la limpieza de lo que escribe |
+| `calcom.py` | Los horarios libres y la reserva de la demo en Cal.com (API v2, solo biblioteca estándar). Cal.com es el dueño de la agenda y el que rechaza un horario tomado |
+| `traspasos.py` | El `Contexto` que deja el webhook para las herramientas (qué conversación, qué canal, qué agenda) y lo que piden hacer **después** de mandar la respuesta |
 | `modelos.py` | Crea el modelo y le pregunta al proveedor cuáles tiene |
 | `memoria.py` | Los checkpointers: `ram` / `sqlite` / `postgres` |
-| `prompts.py` | Lee y guarda `prompts/sistema.md` |
+| `prompts.py` | Lee y guarda `prompts/sistema.md`, y le suma el complemento de `PROMPT_PROTOCOLO` (`prompts/protocolo_ventas.md`) |
 | `respuesta.py` | Parte la respuesta en varios mensajes, o la deja en uno (`MENSAJES_POR_RESPUESTA`) |
 | `frenos.py` | El tope de mensajes por conversación y por día |
 | `avisos.py` | El mail al dueño cuando algo se rompe: por Google (lo recomendado) o por SMTP |
@@ -61,6 +64,8 @@ Lo que importa acá es qué hace cada uno:
 | `web/app.py` | La plataforma de pruebas (FastAPI + un solo HTML) — **no es** el webhook |
 | `../conectar_gmail.py` | Conecta la cuenta de Google que manda los avisos. Se corre una vez, **en la computadora** de la persona (abre el navegador), y deja los tres `GMAIL_*` en el `.env` sin mostrarlos |
 | `../probar_mail.py` | Manda un mail de prueba de los avisos. Es el último paso de la instalación, y se corre **en el servidor** |
+| `../probar_calcom.py` | Revisa la agenda de las demos en Cal.com sin reservar: falla si algún horario cae fuera del acordado. Es el único lugar donde ese horario está escrito |
+| `../prompts/protocolo_ventas.md` | El embudo de ventas y cuándo usar cada herramienta. Va **después** de `sistema.md`, y si chocan manda `sistema.md` |
 | `../n8n/format_chain_v4.js` | La Format Chain nueva, para el que tiene el agente en n8n y la pega a mano. **Es copia exacta** de la que usa el actualizador: un test lo cuida |
 | `../.claude/skills/actualizar-agente-whatsapp/` | El actualizador: una skill de Claude Code que adapta al cobro de Meta un agente hecho en n8n, en este kit o que todavía no existe. Sus pruebas (contra un n8n de mentira) están en `tests/actualizador/` |
 | `../docs/img/` | Las imágenes del README. Se generan aparte; no son parte del agente |
@@ -133,8 +138,15 @@ Ninguna credencial en el código, ni una. Las claves se leen únicamente en
   (cosméticos), `Chatwoot._etiquetas_de()`, `Chatwoot.lo_agarro_otro()` y
   `Chatwoot.ya_la_cerro()` (si no se pueden leer, se responde igual: perder a
   alguien por una consulta caída es peor), y la lectura de un adjunto en
-  `Lector` (si una foto o un audio no se pueden leer, el agente pregunta y el
-  error va al mail). **No agregues otra sin dejar el motivo escrito al lado.**
+ `Lector` (si una foto o un audio no se pueden leer, el agente pregunta y el
+ error va al mail). Las herramientas de ventas devuelven el error como texto,
+ igual que `clima()`; cuando el equipo se tiene que enterar (una reserva que
+ Cal.com no aceptó), además piden pasar a `humano`, y eso trae un mail.
+ `_agenda()` en `herramientas.py` traga que Cal.com no esté configurado (no
+ hay agenda, la herramienta lo dice), y `cumplir()` en `web/webhook.py` no
+ deja escapar nada (la respuesta ya salió: una etiqueta que no se pudo poner
+ queda en el registro y en el mail). **No agregues otra sin dejar el motivo
+ escrito al lado.**
 - **Los tests no gastan tokens.** Usan `GenericFakeChatModel`. Si agregás una
   función que llama a un proveedor, el test va con modelo falso.
 - **Sin dependencias nuevas** salvo que resuelvan algo que no se puede hacer
@@ -460,8 +472,30 @@ Cosas que parecen bugs y no lo son, o que cuestan de encontrar:
   Chatwoot abre una NUEVA cuando la persona vuelve a escribir (y las etiquetas
   no viajan) o reabre la misma (y deja de figurar como resuelta).
 - **Lo que llega adentro de un adjunto no arma renglones**: un nombre de lugar
-  con saltos de línea podría inventar otra línea entre corchetes. `_limpio()`
-  deja todo en una.
+ con saltos de línea podría inventar otra línea entre corchetes. `_limpio()`
+ deja todo en una.
+- **Una herramienta no puede poner `humano` en la mitad del turno.** El
+ webhook vuelve a mirar las etiquetas justo antes de mandar
+ (`ya_no_le_toca()`), así que el agente se callaría su propia respuesta (la
+ confirmación de la demo, por ejemplo). Por eso la herramienta lo PIDE
+ (`Contexto.pedir()`) y el webhook lo hace al final, en `cumplir()`. Lo cuida
+ `test_traspaso_despues_de_reservar_pone_humano_sin_callar_la_confirmacion`.
+- **El contexto de las herramientas va en una `ContextVar`, puesta adentro del
+ hilo** (`pensar()` en el webhook). `asyncio.to_thread` y los hilos de
+ LangGraph copian el contexto, así que cada conversación ve el suyo. Una
+ variable global haría que dos personas que escriben a la vez se pisen el CRM.
+- **Los `custom_attributes` de Chatwoot se reemplazan enteros**, como las
+ etiquetas: `guardar_atributos()` lee, junta y recién ahí manda.
+- **El puntaje no lo manda el modelo.** `sync_prospecto_chatwoot` no tiene
+ `lead_score`, `lead_ruta` ni `lead_banda` entre sus argumentos, a propósito:
+ los calcula `ventas.puntaje()` / `ventas.ruta()`. Tampoco puede marcar
+ `demo_agendada`: eso lo pone la reserva hecha.
+- **La hora de RD es un desfase fijo (UTC-4)** en `calcom.py`, no `zoneinfo`:
+ RD no tiene horario de verano y en Windows `zoneinfo` no trae los husos sin
+ el paquete `tzdata`.
+- **Cal.com pide una versión por pedido** (`cal-api-version`: `2024-09-04` para
+ los horarios, `2026-02-25` para reservar). Sin la cabecera contesta con una
+ versión vieja y otra forma de datos, sin error.
 
 ---
 
@@ -469,7 +503,8 @@ Cosas que parecen bugs y no lo son, o que cuestan de encontrar:
 
 No lo agregues salvo que te lo pidan: son las próximas etapas.
 
-- Más herramientas (hay una sola: el clima)
+- Más herramientas que las que hay (el clima y las tres de ventas)
+- Reprogramar o cancelar una demo desde el chat (pasa a una persona)
 - Leer PDF y videos (llegan, el agente sabe que llegaron y pregunta)
 - Contestar con audio
 - RAG / base de conocimiento
@@ -504,8 +539,10 @@ Tres cosas que importan:
   crudo. Devolviéndolo, el modelo lo lee y lo explica. Está comentado en
   `clima()`.
 - **Sin claves nuevas.** `clima` usa Open-Meteo justamente porque no pide
-  registro ni tarjeta: arrancar el repo no tiene que depender de sacar una
-  credencial más.
+ registro ni tarjeta: arrancar el repo no tiene que depender de sacar una
+ credencial más. Las de Cal.com son la excepción (una agenda no se puede
+ tener sin cuenta), y por eso sin `CALCOM_API_KEY` el agente arranca igual y
+ la herramienta dice que la agenda no está.
 
 > ✅ **La trampa que estaba acá ya está resuelta**, pero conviene entenderla
 > antes de tocar `_armar_entrada()`. Una vuelta de herramienta son tres
@@ -602,6 +639,9 @@ y para mejor: la mitad de las piezas las resuelve Chatwoot.
 | Lo que llega con otra forma | `Chatwoot.traducir()` | Un evento que no es un objeto, un contenido que no es texto o un id de conversación con letras se ignoran: no tiran el servidor ni se cuelan en un mail |
 | Pedidos gigantes y claves débiles | `web/webhook.py` | Más de 512 KB se corta leyendo de a pedazos. El token tiene que tener 32 caracteres o más: si falta, es corto o es el del ejemplo, el servidor no arranca (`validar_token()`). **No se bloquea por dirección**: detrás de Coolify todos llegan con la del proxy y se bloquearía al propio Chatwoot |
 | Notas privadas | `Chatwoot.deberia_responder()` | Son para el equipo: el agente no las contesta |
+| El prospecto en el CRM | `sync_prospecto_chatwoot` → `Chatwoot.guardar_atributos()` | En los `custom_attributes` de la conversación: sobreviven a un reinicio. El puntaje sale de `ventas.puntaje()` |
+| La demo con Jonathan | `verificar_disponibilidad_demo` / `confirmar_reserva_demo` → `calcom.py` | Cal.com es la agenda y el candado: rechaza un horario ya tomado. `demo_uid` en la conversación evita reservar dos veces |
+| El prospecto grande, en caliente | `Contexto.pedir()` → `cumplir()` en el webhook | 2+ sucursales o 3+ estaciones y rol distinto de `otro`: `lead_alto_valor` y mail; con la demo agendada, `humano`. Siempre **después** de mandar |
 | Ventana de 24h y plantillas | Lo maneja Chatwoot | Por eso no está acá |
 
 **El `conversacion` (thread_id) es el id de conversación de Chatwoot.** Un

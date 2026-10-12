@@ -24,6 +24,28 @@ def leer_prompt(ruta: Path) -> str:
     return texto or PROMPT_DE_EMERGENCIA
 
 
+def leer_protocolo(ruta: Path | None) -> str:
+    """El complemento que va después del prompt del sistema (PROMPT_PROTOCOLO).
+
+    Es opcional, así que si falta no hay prompt de emergencia: se sigue solo
+    con el del sistema. Va en un archivo aparte para que el embudo de ventas
+    y las herramientas se puedan cambiar sin tocar el texto del negocio.
+    """
+    if ruta is None:
+        return ""
+    try:
+        return ruta.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+
+def juntar_prompts(sistema: str, protocolo: str) -> str:
+    """El del sistema primero: el protocolo dice que, si chocan, manda ese."""
+    if not protocolo:
+        return sistema
+    return f"{sistema}\n\n---\n\n{protocolo}"
+
+
 def guardar_prompt(ruta: Path, texto: str) -> None:
     """Guarda el prompt del sistema (lo usa el editor de la plataforma web)."""
     ruta.parent.mkdir(parents=True, exist_ok=True)

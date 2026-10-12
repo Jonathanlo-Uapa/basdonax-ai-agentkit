@@ -68,16 +68,17 @@ Para WhatsApp vas a necesitar:
 10. [Modo test y modo producción](#modo-test-y-modo-producción)
 11. [El caché: gastar menos](#el-caché-gastar-menos)
 12. [El clima: la primera herramienta](#el-clima-la-primera-herramienta)
-13. [Ponerlo en Telegram](#ponerlo-en-telegram)
-14. [Seis decisiones antes de desplegar](#seis-decisiones-antes-de-desplegar)
-15. [Lo que entiende: fotos, audios, ubicaciones](#lo-que-entiende-fotos-audios-ubicaciones)
-16. [Que parezca una persona](#que-parezca-una-persona)
-17. [Ponerlo en WhatsApp](#ponerlo-en-whatsapp)
-18. [Dejarlo corriendo en un servidor](#dejarlo-corriendo-en-un-servidor)
-19. [Cambiar la personalidad](#cambiar-la-personalidad)
-20. [Usarlo desde tu código](#usarlo-desde-tu-código)
-21. [Todas las variables del .env](#todas-las-variables-del-env)
-22. [Preguntas que aparecen siempre](#preguntas-que-aparecen-siempre)
+13. [Las ventas: CRM en Chatwoot y demos en Cal.com](#las-ventas-crm-en-chatwoot-y-demos-en-calcom)
+14. [Ponerlo en Telegram](#ponerlo-en-telegram)
+15. [Seis decisiones antes de desplegar](#seis-decisiones-antes-de-desplegar)
+16. [Lo que entiende: fotos, audios, ubicaciones](#lo-que-entiende-fotos-audios-ubicaciones)
+17. [Que parezca una persona](#que-parezca-una-persona)
+18. [Ponerlo en WhatsApp](#ponerlo-en-whatsapp)
+19. [Dejarlo corriendo en un servidor](#dejarlo-corriendo-en-un-servidor)
+20. [Cambiar la personalidad](#cambiar-la-personalidad)
+21. [Usarlo desde tu código](#usarlo-desde-tu-código)
+22. [Todas las variables del .env](#todas-las-variables-del-env)
+23. [Preguntas que aparecen siempre](#preguntas-que-aparecen-siempre)
 
 ---
 
@@ -272,10 +273,14 @@ Abrí **http://localhost:8000**.
 ```
 basdonax-ai-agentkit/
 ├── prompts/
-│   └── sistema.md          ← la personalidad del agente (editalo)
+│   ├── sistema.md          ← la personalidad del agente (editalo)
+│   └── protocolo_ventas.md ← el embudo de ventas y cuándo usar cada herramienta
 ├── src/agente/
 │   ├── agente.py           ← EL AGENTE. El grafo de LangGraph.
-│   ├── herramientas.py     ← lo que sabe hacer además de hablar (el clima)
+│   ├── herramientas.py     ← lo que sabe hacer además de hablar (clima, CRM, demos)
+│   ├── ventas.py           ← el puntaje del prospecto y la limpieza de sus datos
+│   ├── calcom.py           ← los horarios y la reserva de la demo en Cal.com
+│   ├── traspasos.py        ← qué conversación atienden las herramientas
 │   ├── modelos.py          ← Claude / OpenAI / Gemini
 │   ├── memoria.py          ← dónde se guardan las conversaciones
 │   ├── prompts.py          ← lee el prompt del archivo
@@ -306,6 +311,7 @@ basdonax-ai-agentkit/
 ├── webhook_chatwoot.py     ← levantar el webhook de WhatsApp
 ├── conectar_gmail.py       ← conectar la cuenta de Google de los avisos
 ├── probar_mail.py          ← mandar un mail de prueba de los avisos
+├── probar_calcom.py        ← revisar la agenda de las demos (no reserva nada)
 ├── AGENTS.md               ← contexto para Codex, Claude Code, Cursor…
 ├── CLAUDE.md               ← apunta a AGENTS.md
 └── .env                    ← tus claves (no se sube)
@@ -539,6 +545,85 @@ vas a ver los tokens de las dos sumados. Es el precio de que el dato sea real.
 Te lo dice y la charla sigue. La herramienta nunca voltea la conversación:
 cuando algo falla, le devuelve el problema al modelo y el modelo te lo
 explica.
+
+---
+
+## Las ventas: CRM en Chatwoot y demos en Cal.com
+
+Tres herramientas más, para que el agente de LavaPass califique al prospecto
+y le ofrezca la prueba gratuita de 7 días y agende la demo y walkthrough de 15 minutos con Jonathan Lopez (COO) sin que nadie toque nada:
+
+| Herramienta | Qué hace |
+|---|---|
+| `sync_prospecto_chatwoot` | Guarda en la conversación de Chatwoot lo que sabe del prospecto y le dice al modelo la ruta (diagnosticar, prueba de 7 días o demo) |
+| `verificar_disponibilidad_demo` | Le pide a Cal.com los horarios libres y se los da al modelo con la fecha de hoy |
+| `confirmar_reserva_demo` | Reserva en Cal.com el horario que el prospecto aceptó, con el teléfono de su WhatsApp |
+
+El orden de la charla y cuándo usar cada una están en
+`prompts/protocolo_ventas.md`, que se lee **después** de `prompts/sistema.md`
+(`PROMPT_PROTOCOLO`). Si los dos chocan, manda `sistema.md`: los precios, los
+planes y el tono salen de ahí.
+
+**El puntaje lo calcula el código, no el modelo.** Dueño +30, administrador
++22, encargado +12. Una estación +12, dos +20, tres a cinco +28, seis o más
++32. Una sucursal +8, dos +22, tres o más +35. Caja ciega o fuga +18, nómina
+o DGII +14, lluvia +12. Si el prospecto lo dice solo, también suman flota,
+software (cuaderno/Excel) y urgencia. Tope 100. Así un "poneme 100 puntos"
+escrito en el chat no cambia nada.
+
+**Doble objetivo: prueba gratuita + llamada de bienvenida.** Con operación real (1+ estación o
+sucursal) y **55 o más** (o dolor DGII), califica a demo: se le ofrece la prueba de 7 días con framing
+premiante y se agenda la videollamada de 15 minutos con Jonathan Lopez (COO) para walkthrough de
+funcionalidades, bienvenida y mitigación de early churn. Un encargado prueba en patio y se le pide el contacto
+del dueño. Un particular (conductor) se descarta.
+
+**El prospecto grande lo toma una persona en caliente.** Con 2 o más
+sucursales, o 3 o más estaciones, y un rol que no sea `otro`, la conversación
+queda con la etiqueta `lead_alto_valor` y te llega un mail (a `AVISOS_EMAIL`)
+con su ficha. Si además califica para la demo, el agente sigue hasta
+agendarla y recién ahí le pone `humano` y se calla. Las etiquetas van
+**después** de mandar la respuesta: si fueran antes, el agente vería `humano`
+y se callaría su propia confirmación.
+
+**Lo que el modelo no elige:** en qué conversación se guarda, a qué teléfono
+queda la reserva y con quién es la demo. Sale de Chatwoot y de Cal.com. Lo que
+escribe el prospecto (el nombre del negocio, por ejemplo) se guarda en una
+sola línea, sin `<`, `>`, llaves ni corchetes, y con 80 caracteres como mucho.
+
+**No se reserva dos veces.** La reserva queda anotada en la conversación de
+Chatwoot (`demo_uid`), que sobrevive a un reinicio; y si dos personas piden el
+mismo horario, Cal.com acepta la primera y el agente le ofrece otro a la
+segunda.
+
+### Prepararlo en Cal.com (una vez)
+
+En la cuenta de **info@lavapass.app**:
+
+1. Conectá su Google Calendar y Google Meet (*Apps*).
+2. Un tipo de evento de **15 minutos**, con Google Meet como lugar y Jonathan
+   Lopez (COO) como anfitrión.
+3. Su horario (*Availability*), en **America/Santo_Domingo**: lunes de 18 a
+   20, martes nada, de miércoles a viernes de 18 a 21, sábados y domingos de 9
+   a 21. Es el único lugar donde está: el agente le cree a Cal.com.
+4. En las preguntas de la reserva (*Booking questions*): el **teléfono
+   obligatorio** y el **email opcional** (por WhatsApp casi nadie lo da).
+5. Una clave en *Settings → Developer → API keys* → `CALCOM_API_KEY`, y el
+   número del tipo de evento (se ve en la dirección al editarlo) →
+   `CALCOM_EVENT_TYPE_ID`.
+6. En el servidor: `python probar_calcom.py`. Lista los horarios de los
+   próximos 14 días y falla si alguno cae fuera de lo acordado.
+
+En Chatwoot, creá la etiqueta `lead_alto_valor` (o la que pongas en
+`CHATWOOT_ETIQUETA_ALTO_VALOR`). Si querés ver los datos del prospecto en el
+panel de la conversación, definí estos atributos de conversación en
+*Ajustes → Atributos personalizados*: `lead_nombre`, `negocio_nombre`, `rol`,
+`estaciones`, `sucursales`, `dolor_principal`, `etapa_embudo`, `lead_score`,
+`lead_ruta`, `lead_banda`, `segmento`, `software_actual`, `urgencia`,
+`alto_valor`, `demo_inicio`, `demo_uid`.
+
+Fuera de WhatsApp (la terminal, la web, Telegram) estas herramientas no
+guardan ni reservan nada: lo dicen y la charla sigue. Buscar horarios sí anda
+si Cal.com está configurado.
 
 ---
 
@@ -1061,9 +1146,10 @@ docker run -d --env-file .env -p 8000:8000 --name agente agente
    ```
    PROVEEDOR · OPENAI_API_KEY · MODELO_OPENAI
    MODO=produccion · POSTGRES_DSN
-   CACHE · MAX_TOKENS · MEMORIA_MENSAJES · PROMPT_SISTEMA
+   CACHE · MAX_TOKENS · MEMORIA_MENSAJES · PROMPT_SISTEMA · PROMPT_PROTOCOLO
    CHATWOOT_URL · CHATWOOT_TOKEN · CHATWOOT_CUENTA_ID
    CHATWOOT_WEBHOOK_TOKEN · CHATWOOT_ETIQUETA_HUMANO · BUFFER_SEGUNDOS
+   CHATWOOT_ETIQUETA_ALTO_VALOR · CALCOM_API_KEY · CALCOM_EVENT_TYPE_ID · CALCOM_URL
    MENSAJES_POR_RESPUESTA · TOPE_MENSAJES_POR_DIA · LARGO_MAXIMO_DE_ENTRADA
    RESPETAR_RESUELTAS · SOLO_EL_PRIMER_MENSAJE
    AVISOS_EMAIL · GMAIL_CLIENT_ID · GMAIL_CLIENT_SECRET · GMAIL_REFRESH_TOKEN
@@ -1207,6 +1293,10 @@ la herramienta le sirve. Si está mal escrito, la herramienta no se usa nunca.
 | `MAX_TOKENS` | `4096` | Cuánto puede escribir el agente por respuesta |
 | `MEMORIA_MENSAJES` | `20` | Cuántos mensajes recuerda |
 | `PROMPT_SISTEMA` | `prompts/sistema.md` | Qué archivo usar de personalidad |
+| `PROMPT_PROTOCOLO` | — (el `.env.example` trae `prompts/protocolo_ventas.md`) | Un complemento que se lee después de `PROMPT_SISTEMA` (si chocan, manda ese). Vacío = no se suma nada |
+| `CALCOM_API_KEY` | — | La clave de Cal.com (empieza con `cal_`), para los horarios y la reserva de la demo |
+| `CALCOM_EVENT_TYPE_ID` | — | El número del tipo de evento de la demo en Cal.com |
+| `CALCOM_URL` | `https://api.cal.com` | La API de Cal.com (cambiala solo si tenés uno propio) |
 | `TELEGRAM_TOKEN` | — | El token de @BotFather, para `bot_telegram.py` |
 
 Y estas, solo si vas a atender WhatsApp con `webhook_chatwoot.py`:
@@ -1218,6 +1308,7 @@ Y estas, solo si vas a atender WhatsApp con `webhook_chatwoot.py`:
 | `CHATWOOT_CUENTA_ID` | `1` | El número que ves en la URL de Chatwoot |
 | `CHATWOOT_WEBHOOK_TOKEN` | — | El secreto que va en la URL del webhook |
 | `CHATWOOT_ETIQUETA_HUMANO` | `humano` | La etiqueta que apaga al bot en una conversación |
+| `CHATWOOT_ETIQUETA_ALTO_VALOR` | `lead_alto_valor` | La que marca al prospecto con 2+ sucursales o 3+ estaciones y un rol que no es `otro` (y te llega un mail) |
 | `BUFFER_SEGUNDOS` | `8` | Cuánto espera juntando la ráfaga antes de contestar |
 | `MENSAJES_POR_RESPUESTA` | `3` | De `1` (todo en un mensaje) a `5`. `3` = como una persona, en varios globos. Meta cobra por mensaje |
 | `TOPE_MENSAJES_POR_DIA` | `0` (el `.env.example` trae `50`) | Cuántos mensajes de una misma conversación atiende en 24 h antes de pasarla a `humano` (cuentan los que manda la persona, no las respuestas). `0` = sin tope |

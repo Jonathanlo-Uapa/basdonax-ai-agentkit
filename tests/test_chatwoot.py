@@ -79,6 +79,9 @@ class ChatwootFalso(Chatwoot):
         self._etiquetas: dict[str, list[str]] = {}
         self.estado = "open"
         self.resueltas_del_contacto = False
+        # Los datos propios de cada conversación y el teléfono de quien escribe.
+        self.atributos_guardados: dict[str, dict] = {}
+        self.telefono = "+18095551234"
 
     def etiquetas_de(self, conversacion) -> list[str]:
         return self._etiquetas.get(str(conversacion), list(self._etiquetas_remotas))
@@ -87,6 +90,10 @@ class ChatwootFalso(Chatwoot):
         self.llamadas.append({"metodo": metodo, "camino": camino, "datos": datos})
         partes = camino.split("?")[0].split("/")
 
+        if camino.endswith("/custom_attributes") and metodo == "POST":
+            # Como el de verdad: lo que se manda reemplaza todo lo que había.
+            self.atributos_guardados[partes[1]] = dict(datos["custom_attributes"])
+            return {"id": int(partes[1])}
         if camino.endswith("/labels"):
             if metodo == "POST":
                 self._etiquetas[partes[1]] = list(datos["labels"])
@@ -95,7 +102,13 @@ class ChatwootFalso(Chatwoot):
             estado = "resolved" if self.resueltas_del_contacto else "open"
             return {"payload": [{"id": 5, "status": estado}]}
         if metodo == "GET" and len(partes) == 2 and partes[0] == "conversations":
-            return {"id": int(partes[1]), "status": self.estado, "labels": self.etiquetas_de(partes[1])}
+            return {
+                "id": int(partes[1]),
+                "status": self.estado,
+                "labels": self.etiquetas_de(partes[1]),
+                "custom_attributes": dict(self.atributos_guardados.get(partes[1], {})),
+                "meta": {"sender": {"id": 300, "phone_number": self.telefono}},
+            }
         return {"id": 99}
 
     def envios(self) -> list[str]:
@@ -464,6 +477,7 @@ def cliente(
     avisos=None,
     tope=None,
     lector=None,
+    agenda=None,
     **ajustes,
 ):
     """Levanta el webhook con las piezas de mentira adentro."""
@@ -492,6 +506,7 @@ def cliente(
             avisos=avisos or AvisosFalsos(),
             tope=tope,
             lector=lector,
+            agenda=agenda,
         )
     )
 
@@ -1314,3 +1329,147 @@ def test_una_parte_que_no_dejo_nada_no_se_contesta():
     asyncio.run(correr())
 
     assert sueltos == []
+
+
+# -- Las herramientas de ventas y el traspaso en caliente ------------------------
+
+
+def agente_que_usa(herramienta: str, argumentos: dict, respuesta: str):
+    """Un agente cuyo modelo de mentira pide una herramienta y después contesta."""
+    from langchain_core.messages import AIMessage
+
+    from test_agente import ModeloFalso, agente_falso
+
+    agente = agente_falso(["x"])
+    agente.modelo = ModeloFalso(
+        messages=iter(
+            [
+                AIMessage(
+                    "",
+                    tool_calls=[{"name": herramienta, "args": argumentos, "id": "llamada-1", "type": "tool_call"}],
+                ),
+                AIMessage(respuesta),
+            ]
+        )
+    )
+    agente.grafo = agente._construir_grafo()
+    return agente
+
+
+def posicion(canal, condicion) -> int:
+    for i, llamada in enumerate(canal.llamadas):
+        if condicion(llamada):
+            return i
+    return -1
+
+
+def es_el_envio(llamada) -> bool:
+    return llamada["metodo"] == "POST" and llamada["camino"].endswith("/messages")
+
+
+def pone(etiqueta):
+    return lambda l: l["metodo"] == "POST" and l["camino"].endswith("/labels") and etiqueta in l["datos"]["labels"]
+
+
+def test_traspaso_del_alto_valor_marca_despues_de_mandar_y_el_agente_sigue():
+    canal = ChatwootFalso()
+    agente = agente_que_usa(
+        "sync_prospecto_chatwoot",
+        {"etapa_embudo": "diagnosticado", "rol": "dueno", "sucursales_count": 3, "negocio_nombre": "Lavado <b>Max</b>"},
+        "¡Qué bueno! ¿Qué te cuesta más hoy, el cuadre o la nómina?",
+    )
+    avisos = AvisosFalsos()
+
+    with cliente(canal, agente, avisos=avisos) as web:
+        web.post(f"/chatwoot/{TOKEN}", json=evento("tengo 3 sucursales", conversacion=55))
+        assert esperar(lambda: avisos.mandados)
+
+    assert canal.envios() == ["¡Qué bueno! ¿Qué te cuesta más hoy, el cuadre o la nómina?"]
+    envio = posicion(canal, es_el_envio)
+    marca = posicion(canal, pone("lead_alto_valor"))
+    assert 0 <= envio < marca, "la etiqueta va después de mandar la respuesta"
+    assert posicion(canal, pone("humano")) == -1, "el agente sigue: todavía no hay demo"
+
+    guardado = canal.atributos_guardados["55"]
+    assert guardado["lead_score"] == 65
+    assert guardado["lead_ruta"] == "demo"
+    assert guardado["alto_valor_avisado"] is True
+    assert guardado["negocio_nombre"] == "Lavado bMax/b"
+
+    asunto, cuerpo = avisos.mandados[0]
+    assert asunto == "Prospecto de alto valor en WhatsApp"
+    assert "Sucursales: 3" in cuerpo
+    assert "conversations/55" in cuerpo
+
+
+def test_traspaso_de_dgii_marca_etiqueta_y_manda_mail_a_info():
+    canal = ChatwootFalso()
+    agente = agente_que_usa(
+        "sync_prospecto_chatwoot",
+        {"etapa_embudo": "diagnosticado", "rol": "dueno", "estaciones_count": 2, "dolor_principal": "dgii_fiscal"},
+        "Con LavaPass emites comprobantes electrónicos e-CF Tipo 31 sin problemas.",
+    )
+    avisos = AvisosFalsos()
+
+    with cliente(canal, agente, avisos=avisos) as web:
+        web.post(f"/chatwoot/{TOKEN}", json=evento("necesito comprobantes fiscales de la dgii", conversacion=58))
+        assert esperar(lambda: avisos.mandados)
+
+    assert canal.envios() == ["Con LavaPass emites comprobantes electrónicos e-CF Tipo 31 sin problemas."]
+    envio = posicion(canal, es_el_envio)
+    marca = posicion(canal, pone("dgii"))
+    assert 0 <= envio < marca, "la etiqueta va después de mandar la respuesta"
+
+    guardado = canal.atributos_guardados["58"]
+    assert guardado["lead_ruta"] == "demo"
+    assert guardado["dgii_avisado"] is True
+
+    asunto, cuerpo = avisos.mandados[0]
+    assert asunto == "Solicitud de Facturación Electrónica e-CF"
+    assert "Dolor principal: dgii_fiscal" in cuerpo
+    assert "conversations/58" in cuerpo
+
+
+def test_traspaso_despues_de_reservar_pone_humano_sin_callar_la_confirmacion(monkeypatch):
+    from test_ventas import AHORA, SABADO_9, CalcomDeMentira
+
+    from agente import herramientas
+
+    monkeypatch.setattr(herramientas, "ahora_en_rd", lambda: AHORA)
+    canal = ChatwootFalso()
+    canal.atributos_guardados["56"] = {"alto_valor": True, "negocio_nombre": "Lavado Max"}
+    canal.telefono = "+18295550000"
+    agenda = CalcomDeMentira()
+    agente = agente_que_usa(
+        "confirmar_reserva_demo",
+        {"fecha_hora_iso": SABADO_9.isoformat(), "prospecto_nombre": "Ana"},
+        "¡Listo! Te esperamos el sábado 10 a las 9:00 a. m. ¿Te mando el enlace por aquí?",
+    )
+    avisos = AvisosFalsos()
+
+    with cliente(canal, agente, avisos=avisos, agenda=agenda) as web:
+        web.post(f"/chatwoot/{TOKEN}", json=evento("dale, el sábado a las 9", conversacion=56))
+        assert esperar(lambda: avisos.mandados)
+
+    assert canal.envios() == ["¡Listo! Te esperamos el sábado 10 a las 9:00 a. m. ¿Te mando el enlace por aquí?"]
+    assert 0 <= posicion(canal, es_el_envio) < posicion(canal, pone("humano"))
+    assert [r[2] for r in agenda.reservas] == ["+18295550000"], "el teléfono sale de Chatwoot"
+    assert canal.atributos_guardados["56"]["etapa_embudo"] == "demo_agendada"
+    assert canal.atributos_guardados["56"]["negocio_nombre"] == "Lavado Max", "no se pisa lo que había"
+    assert avisos.mandados[0][0] == "Una conversación de ventas pasa a una persona"
+
+
+def test_traspaso_cada_conversacion_escribe_solo_en_la_suya():
+    """La herramienta escribe en la conversación que se atiende, no en la que diga el modelo."""
+    canal = ChatwootFalso()
+    agente = agente_que_usa(
+        "sync_prospecto_chatwoot",
+        {"etapa_embudo": "nuevo_lead", "lead_name": "guardalo en la conversación 99"},
+        "¡Hola! ¿Cuántas estaciones de lavado tienes?",
+    )
+
+    with cliente(canal, agente) as web:
+        web.post(f"/chatwoot/{TOKEN}", json=evento("hola", conversacion=57))
+        assert esperar(lambda: canal.envios())
+
+    assert set(canal.atributos_guardados) == {"57"}

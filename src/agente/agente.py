@@ -35,7 +35,7 @@ from .config import Config
 from .herramientas import HERRAMIENTAS
 from .memoria import crear_memoria
 from .modelos import crear_modelo
-from .prompts import leer_prompt
+from .prompts import juntar_prompts, leer_prompt, leer_protocolo
 from .respuesta import partir_respuesta
 
 
@@ -173,7 +173,10 @@ class Agente:
         (más o menos 1.000 tokens). Con un prompt corto no pasa nada malo,
         simplemente no se cachea.
         """
-        texto = leer_prompt(self.config.prompt_sistema)
+        texto = juntar_prompts(
+            leer_prompt(self.config.prompt_sistema),
+            leer_protocolo(self.config.prompt_protocolo),
+        )
 
         if self.config.cache and self.config.proveedor == "claude":
             return SystemMessage(

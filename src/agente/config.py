@@ -50,6 +50,9 @@ class Config:
     max_tokens: int
     memoria_mensajes: int
     prompt_sistema: Path
+    # El complemento que va después del prompt del sistema: el embudo de
+    # ventas y cuándo usar cada herramienta. None = no se suma nada.
+    prompt_protocolo: Path | None = None
     modo: str = "test"
     cache: bool = True
     sqlite_ruta: str = "datos/conversaciones.db"
@@ -65,6 +68,9 @@ class Config:
     # La etiqueta que apaga al bot en una conversación: el traspaso a una
     # persona. Se pone con un clic desde la bandeja de Chatwoot.
     chatwoot_etiqueta_humano: str = "humano"
+    # La que marca al prospecto de alto valor (varias sucursales o muchas
+    # estaciones): el equipo lo ve en la bandeja y le llega un mail.
+    chatwoot_etiqueta_alto_valor: str = "lead_alto_valor"
     # El secreto que va en la URL del webhook. Chatwoot no firma sus pedidos,
     # así que esto es lo único que separa un mensaje de verdad de cualquiera
     # que haya descubierto el dominio.
@@ -132,6 +138,13 @@ class Config:
     smtp_puerto: int = 587
     smtp_usuario: str = ""
     smtp_clave: str = field(default="", repr=False)
+
+    # -- Las demos con Jonathan, por Cal.com (herramientas.py) ------------------
+    # Sin clave o sin tipo de evento, el agente no ofrece horarios: lo dice y
+    # la conversación sigue.
+    calcom_url: str = "https://api.cal.com"
+    calcom_api_key: str = field(default="", repr=False)
+    calcom_event_type_id: str = ""
 
     @classmethod
     def desde_entorno(
@@ -210,6 +223,9 @@ class Config:
                 f"dígitos), no «{numero_id[:30]}». No es el número de teléfono."
             )
 
+        protocolo = (os.getenv("PROMPT_PROTOCOLO") or "").strip()
+        calcom = datos_de_calcom()
+
         return cls(
             proveedor=proveedor,
             modelo=modelo,
@@ -217,6 +233,7 @@ class Config:
             max_tokens=_entero("MAX_TOKENS", 4096),
             memoria_mensajes=_entero("MEMORIA_MENSAJES", 20),
             prompt_sistema=RAIZ / os.getenv("PROMPT_SISTEMA", "prompts/sistema.md"),
+            prompt_protocolo=RAIZ / protocolo if protocolo else None,
             modo=modo,
             cache=_booleano("CACHE", True),
             sqlite_ruta=os.getenv("SQLITE_RUTA", "datos/conversaciones.db"),
@@ -227,6 +244,9 @@ class Config:
             chatwoot_cuenta_id=(os.getenv("CHATWOOT_CUENTA_ID") or "1").strip(),
             chatwoot_etiqueta_humano=(
                 os.getenv("CHATWOOT_ETIQUETA_HUMANO") or "humano"
+            ).strip(),
+            chatwoot_etiqueta_alto_valor=(
+                os.getenv("CHATWOOT_ETIQUETA_ALTO_VALOR") or "lead_alto_valor"
             ).strip(),
             chatwoot_webhook_token=(
                 os.getenv("CHATWOOT_WEBHOOK_TOKEN") or ""
@@ -261,7 +281,30 @@ class Config:
             smtp_puerto=_entero("SMTP_PUERTO", 587),
             smtp_usuario=(os.getenv("SMTP_USUARIO") or "").strip(),
             smtp_clave=(os.getenv("SMTP_CLAVE") or "").strip(),
+            calcom_url=calcom["url"],
+            calcom_api_key=calcom["clave"],
+            calcom_event_type_id=calcom["evento"],
         )
+
+
+def datos_de_calcom() -> dict[str, str]:
+    """Lo de Cal.com, suelto: sin pedir la clave del modelo.
+
+    Lo usan `Config.desde_entorno()` y `probar_calcom.py`, que corre en el
+    servidor para revisar la agenda y no tiene por qué saber del modelo (lo
+    mismo que hace `Avisos.desde_entorno()` con el mail).
+    """
+    evento = (os.getenv("CALCOM_EVENT_TYPE_ID") or "").strip()
+    if evento and not evento.isdigit():
+        raise ErrorDeConfiguracion(
+            "CALCOM_EVENT_TYPE_ID es el número del tipo de evento en Cal.com "
+            f"(solo dígitos, se ve en la dirección al editarlo), no «{evento[:30]}»."
+        )
+    return {
+        "url": (os.getenv("CALCOM_URL") or "https://api.cal.com").strip().rstrip("/"),
+        "clave": (os.getenv("CALCOM_API_KEY") or "").strip(),
+        "evento": evento,
+    }
 
 
 def proveedores_disponibles() -> dict[str, bool]:

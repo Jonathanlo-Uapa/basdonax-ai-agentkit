@@ -226,6 +226,66 @@ def test_sin_cache_el_prompt_va_pelado():
     assert isinstance(a._armar_entrada({"messages": []})[0].content, str)
 
 
+PROTOCOLO = RAIZ / "prompts/protocolo_ventas.md"
+
+
+def test_sin_protocolo_el_prompt_es_solo_el_del_sistema():
+    a = agente_falso(["x"])
+    a.config.cache = False
+    assert a.config.prompt_protocolo is None, "por defecto no se suma nada"
+    assert a._armar_entrada({"messages": []})[0].content == leer_prompt(a.config.prompt_sistema)
+
+
+def test_el_protocolo_va_despues_del_sistema():
+    """Primero el del sistema: el protocolo dice que, si chocan, manda ese."""
+    a = agente_falso(["x"])
+    a.config.cache = False
+    a.config.prompt_protocolo = PROTOCOLO
+
+    texto = a._armar_entrada({"messages": []})[0].content
+
+    sistema = leer_prompt(a.config.prompt_sistema)
+    assert texto.startswith(sistema)
+    assert texto.endswith(PROTOCOLO.read_text(encoding="utf-8").strip())
+    assert "manda lo de arriba" in texto
+
+
+def test_con_protocolo_y_cache_de_claude_sigue_siendo_un_solo_bloque():
+    a = agente_falso(["x"])
+    a.config.cache = True
+    a.config.proveedor = "claude"
+    a.config.prompt_protocolo = PROTOCOLO
+
+    contenido = a._armar_entrada({"messages": []})[0].content
+
+    assert len(contenido) == 1
+    assert contenido[0]["cache_control"] == {"type": "ephemeral"}
+    assert "PROTOCOLO DE VENTAS" in contenido[0]["text"]
+
+
+def test_si_falta_el_archivo_del_protocolo_sigue_con_el_del_sistema(tmp_path):
+    a = agente_falso(["x"])
+    a.config.cache = False
+    a.config.prompt_protocolo = tmp_path / "no-existe.md"
+    assert a._armar_entrada({"messages": []})[0].content == leer_prompt(a.config.prompt_sistema)
+
+
+def test_el_protocolo_se_elige_desde_el_env(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "clave-de-prueba")
+    monkeypatch.setenv("PROMPT_PROTOCOLO", "prompts/protocolo_ventas.md")
+    assert Config.desde_entorno(proveedor="claude").prompt_protocolo == PROTOCOLO
+
+    monkeypatch.setenv("PROMPT_PROTOCOLO", "")
+    assert Config.desde_entorno(proveedor="claude").prompt_protocolo is None
+
+
+def test_el_protocolo_no_contradice_al_sistema():
+    """sistema.md manda: el protocolo no trae precios, planes ni otro nombre."""
+    texto = PROTOCOLO.read_text(encoding="utf-8")
+    for prohibido in ("RD$", "STARTER", "Carlos", "usted", "pista", "patentad"):
+        assert prohibido not in texto
+
+
 def test_avisa_si_falta_la_clave(monkeypatch):
     monkeypatch.setenv("PROVEEDOR", "claude")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")

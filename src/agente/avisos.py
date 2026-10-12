@@ -205,13 +205,14 @@ class Avisos:
         if self.metodo == "google" and self.activos:
             self._acceso_de_google(renovar=True)
 
-    def avisar(self, asunto: str, cuerpo: str, tipo: str) -> bool:
+    def avisar(self, asunto: str, cuerpo: str, tipo: str, para: str = "") -> bool:
         """Manda el aviso si corresponde. Devuelve True si salió un mail.
 
         `tipo` agrupa los errores iguales: de un mismo tipo sale un mail por
         hora como mucho.
         """
-        if not self.activos:
+        destino = (para or self.para).strip()
+        if not destino:
             registro.warning("Sin AVISOS_EMAIL: el aviso queda solo acá - %s", asunto)
             return False
 
@@ -234,7 +235,15 @@ class Avisos:
         self._ultimo[tipo] = ahora
 
         try:
-            self._enviar(asunto, cuerpo)
+            if para and para != self.para:
+                original = self.para
+                self.para = para
+                try:
+                    self._enviar(asunto, cuerpo)
+                finally:
+                    self.para = original
+            else:
+                self._enviar(asunto, cuerpo)
         except Exception as e:
             # Por qué se traga: el aviso es para enterarse de un problema, y
             # si él mismo voltea el servidor se convierte en el problema.
@@ -242,7 +251,7 @@ class Avisos:
             registro.error("No salió el mail de aviso (%s): %s", asunto, e)
             return False
 
-        registro.info("Aviso mandado a %s: %s", self.para, asunto)
+        registro.info("Aviso mandado a %s: %s", destino, asunto)
         return True
 
     def _enviar(self, asunto: str, cuerpo: str) -> None:

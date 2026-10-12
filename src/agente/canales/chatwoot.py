@@ -388,20 +388,65 @@ class Chatwoot(Canal):
         Y si no se pueden leer, no se sigue: mejor no poner la etiqueta que
         borrarle al equipo las que puso a mano.
         """
-        if not self.etiqueta_humano:
+        self.sumar_etiqueta(conversacion, self.etiqueta_humano)
+
+    def sumar_etiqueta(self, conversacion: str, etiqueta: str) -> None:
+        """Le suma una etiqueta a la conversación sin sacarle las que ya tenía."""
+        etiqueta = (etiqueta or "").strip().lower()
+        if not etiqueta:
             return
 
         respuesta = self._api("GET", f"conversations/{conversacion}/labels")
         etiquetas = [str(e) for e in respuesta.get("payload") or []]
 
-        if self.etiqueta_humano in {e.strip().lower() for e in etiquetas}:
+        if etiqueta in {e.strip().lower() for e in etiquetas}:
             return
 
         self._api(
             "POST",
             f"conversations/{conversacion}/labels",
-            {"labels": etiquetas + [self.etiqueta_humano]},
+            {"labels": etiquetas + [etiqueta]},
         )
+
+    # -- Los datos del prospecto (las herramientas de ventas) ------------------
+
+    def atributos(self, conversacion: str) -> dict:
+        """Los datos propios de la conversación (`custom_attributes`).
+
+        Ahí vive la etapa del embudo y la reserva de la demo: sobreviven a un
+        reinicio del agente, que es lo que hace falta para no reservar dos
+        veces si Chatwoot reintenta un mensaje después de un deploy.
+        """
+        datos = self._api("GET", f"conversations/{conversacion}")
+        atributos = datos.get("custom_attributes")
+        return dict(atributos) if isinstance(atributos, dict) else {}
+
+    def guardar_atributos(self, conversacion: str, cambios: dict) -> dict:
+        """Suma esos datos a la conversación y devuelve cómo quedaron.
+
+        Igual que con las etiquetas: Chatwoot REEMPLAZA la lista entera con lo
+        que se le manda. Mandar solo lo nuevo borraría lo que puso el equipo a
+        mano, así que primero se lee y después se junta.
+        """
+        juntos = {**self.atributos(conversacion), **cambios}
+        self._api(
+            "POST",
+            f"conversations/{conversacion}/custom_attributes",
+            {"custom_attributes": juntos},
+        )
+        return juntos
+
+    def telefono_de(self, conversacion: str) -> str:
+        """El número de WhatsApp de quien escribe, como lo guarda Chatwoot (+1809…).
+
+        Sale de Chatwoot y no del modelo, a propósito: si el modelo lo eligiera,
+        un mensaje bien armado podría hacer que la reserva quede a nombre de
+        otro número.
+        """
+        datos = self._api("GET", f"conversations/{conversacion}")
+        remitente = (datos.get("meta") or {}).get("sender") or {}
+        telefono = remitente.get("phone_number") if isinstance(remitente, dict) else ""
+        return str(telefono or "").strip()
 
     def enlace(self, conversacion: str) -> str:
         """La dirección de la conversación en la bandeja. Va en los avisos por mail."""

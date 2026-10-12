@@ -49,6 +49,7 @@ from fastapi.responses import JSONResponse
 
 from ..agente import Agente
 from ..avisos import Avisos
+from ..calcom import Calcom
 from ..canales.adjuntos import DescriptorDeFotos, Lector, TranscriptorOpenAI
 from ..canales.base import MensajeEntrante
 from ..canales.buffer import BufferDeMensajes
@@ -58,6 +59,14 @@ from ..config import Config, ErrorDeConfiguracion
 from ..frenos import BLOQUEAR, IGNORAR, TopeDeMensajes
 from ..modelos import crear_modelo
 from ..respuesta import partir_respuesta
+from ..traspasos import (
+    A_UNA_PERSONA,
+    ALTO_VALOR,
+    SOLICITUD_DGII,
+    Contexto,
+    Pedido,
+    atendiendo,
+)
 
 registro = logging.getLogger("agente.webhook")
 
@@ -107,6 +116,33 @@ La conversación: {enlace}
 
 Si pasa con todos los audios, revisá OPENAI_API_KEY (la clave o el saldo).
 De un mismo error te llega un mail por hora como mucho."""
+
+MAIL_DE_ALTO_VALOR = """Entró un prospecto de alto valor por WhatsApp (varias sucursales o muchas estaciones).
+
+{ficha}
+
+El agente sigue con la conversación hasta agendarle la demo con Jonathan; cuando
+quede agendada, le pone «{humano}» y se calla. Si querés tomarlo ya, ponele
+«{humano}» vos desde la bandeja.
+
+La conversación quedó con la etiqueta «{alto_valor}»: {enlace}"""
+
+MAIL_DE_DGII = """Solicitud de Facturación Electrónica e-CF recibida por WhatsApp.
+
+Un prospecto solicitó formalmente asistencia para Facturación Electrónica (DGII e-CF Tipo 31):
+
+{ficha}
+
+El agente continúa la conversación ofreciendo la demo de operatividad y confirmando que un asesor fiscal le contactará a la brevedad.
+
+La conversación quedó con la etiqueta «dgii»: {enlace}"""
+
+MAIL_DE_TRASPASO = """Una conversación de ventas pasó a una persona.
+
+{motivo}
+
+{etiqueta}
+La conversación: {enlace}"""
 
 CAUSA_MODELO = (
     "la clave del modelo (vencida o mal cargada en el servidor) o la cuenta del "
@@ -215,12 +251,13 @@ def crear_app(
     avisos: Avisos | None = None,
     tope: TopeDeMensajes | None = None,
     lector: Lector | None = None,
+    agenda: Calcom | None = None,
 ) -> FastAPI:
     """Arma el servidor.
 
-    El agente, el canal, los avisos y el lector se pueden pasar armados: es
-    lo que hacen los tests para probar todo esto sin salir a internet, sin
-    mandar un mail y sin gastar un token.
+    El agente, el canal, los avisos, el lector y la agenda se pueden pasar
+    armados: es lo que hacen los tests para probar todo esto sin salir a
+    internet, sin mandar un mail y sin gastar un token.
     """
     config = config or Config.desde_entorno()
     validar_token(config.chatwoot_webhook_token)
@@ -239,6 +276,8 @@ def crear_app(
     avisos = avisos or Avisos.desde_config(config)
     tope = tope or TopeDeMensajes(config.tope_mensajes_por_dia)
     lector = lector or armar_lector(config, canal)
+    if agenda is None and config.calcom_api_key and config.calcom_event_type_id:
+        agenda = Calcom(config.calcom_url, config.calcom_api_key, config.calcom_event_type_id)
     etiqueta = config.chatwoot_etiqueta_humano
     con_meta = bool(config.whatsapp_token and config.whatsapp_phone_number_id)
 
@@ -310,8 +349,90 @@ def crear_app(
         registro.info("[%s] no contesto: mientras esperaba, %s", conversacion, motivo)
         return True
 
+    def pensar(contexto: Contexto, texto: str):
+        """El agente, con las herramientas de ventas apuntando a ESTA conversación.
+
+        El contexto se pone adentro del hilo y no afuera: así cada respuesta que
+        se piensa a la vez tiene el suyo (ver traspasos.py).
+        """
+        with atendiendo(contexto):
+            return agente.responder(texto, contexto.conversacion)
+
+    async def cumplir(conversacion: str, pedidos: list[Pedido]) -> None:
+        """Lo que pidieron las herramientas, cuando la respuesta ya salió (o no va a salir).
+
+        Va al final a propósito: si la etiqueta `humano` se pusiera en la mitad
+        del turno, la última mirada antes de mandar (`ya_no_le_toca`) la vería y
+        el agente se callaría su propia respuesta.
+
+        Por qué no se deja escapar ningún error acá: la respuesta ya se mandó, y
+        una etiqueta que no se pudo poner no puede voltear la tarea. Queda en el
+        registro y, cuando se puede, en el mail.
+        """
+        for pedido in pedidos:
+            if pedido.tipo == ALTO_VALOR:
+                try:
+                    await asyncio.to_thread(
+                        canal.sumar_etiqueta, conversacion, config.chatwoot_etiqueta_alto_valor
+                    )
+                    await asyncio.to_thread(
+                        canal.guardar_atributos, conversacion, {"alto_valor_avisado": True}
+                    )
+                except Exception as e:
+                    registro.error("[%s] no se pudo marcar el alto valor: %s", conversacion, e)
+                registro.info("[%s] prospecto de alto valor: aviso al equipo", conversacion)
+                await asyncio.to_thread(
+                    avisos.avisar,
+                    "Prospecto de alto valor en WhatsApp",
+                    MAIL_DE_ALTO_VALOR.format(
+                        ficha=pedido.detalle,
+                        humano=etiqueta,
+                        alto_valor=config.chatwoot_etiqueta_alto_valor,
+                        enlace=canal.enlace(conversacion),
+                    ),
+                    f"lead:{conversacion}",
+                )
+            elif pedido.tipo == SOLICITUD_DGII:
+                try:
+                    await asyncio.to_thread(canal.sumar_etiqueta, conversacion, "dgii")
+                    await asyncio.to_thread(
+                        canal.guardar_atributos, conversacion, {"dgii_avisado": True}
+                    )
+                except Exception as e:
+                    registro.error("[%s] no se pudo marcar la etiqueta dgii: %s", conversacion, e)
+                registro.info("[%s] solicitud de facturación electrónica e-CF: aviso al equipo", conversacion)
+                await asyncio.to_thread(
+                    avisos.avisar,
+                    "Solicitud de Facturación Electrónica e-CF",
+                    MAIL_DE_DGII.format(
+                        ficha=pedido.detalle,
+                        enlace=canal.enlace(conversacion),
+                    ),
+                    f"dgii:{conversacion}",
+                    para="info@lavapass.app",
+                )
+            elif pedido.tipo == A_UNA_PERSONA:
+                try:
+                    await asyncio.to_thread(canal.pasar_a_persona, conversacion)
+                    resultado = f"Quedó con la etiqueta «{etiqueta}»: el agente no le contesta hasta que se la saques."
+                except Exception as e:
+                    registro.error("[%s] no se pudo pasar a una persona: %s", conversacion, e)
+                    resultado = f"No se pudo poner la etiqueta «{etiqueta}» ({type(e).__name__}): el agente le va a seguir contestando."
+                registro.info("[%s] pasa a una persona: %s", conversacion, _CONTROL.sub(" ", pedido.detalle)[:200])
+                await asyncio.to_thread(
+                    avisos.avisar,
+                    "Una conversación de ventas pasa a una persona",
+                    MAIL_DE_TRASPASO.format(
+                        motivo=pedido.detalle,
+                        etiqueta=resultado,
+                        enlace=canal.enlace(conversacion),
+                    ),
+                    f"traspaso:{conversacion}",
+                )
+
     async def responder(conversacion: str, texto: str) -> None:
         """Le pasa la ráfaga al agente y manda la respuesta por Chatwoot."""
+        contexto = Contexto(conversacion=conversacion, canal=canal, calcom=agenda)
         async with candados[conversacion]:
             if len(texto) > config.largo_maximo_de_entrada:
                 registro.warning(
@@ -340,9 +461,7 @@ def crear_app(
                 )
 
                 try:
-                    respuesta = await asyncio.to_thread(
-                        agente.responder, texto, conversacion
-                    )
+                    respuesta = await asyncio.to_thread(pensar, contexto, texto)
                 except Exception as e:
                     await algo_se_rompio(conversacion, e, CAUSA_MODELO, "modelo")
                     return
@@ -391,6 +510,8 @@ def crear_app(
                         registro.error("[%s] no se pudo pasar a una persona: %s", conversacion, e)
             finally:
                 await asyncio.to_thread(canal.escribiendo, conversacion, False)
+                if contexto.pedidos:
+                    await cumplir(conversacion, contexto.pedidos)
 
     async def algo_se_rompio(conversacion: str, error: Exception, causa: str, tipo: str) -> None:
         """El modelo o Chatwoot fallaron: el equipo se entera, el cliente no.
@@ -520,7 +641,7 @@ def crear_app(
         registro.info(
             "Agente escuchando - %s / %s - memoria %s - buffer %ss - "
             "%s mensaje(s) por respuesta - tope %s por día - avisos %s - "
-            "fotos %s - audios %s - resolver %s",
+            "fotos %s - audios %s - resolver %s - demos %s - protocolo %s",
             config.proveedor,
             config.modelo,
             "Postgres" if config.modo == "produccion" else "SQLite",
@@ -531,6 +652,8 @@ def crear_app(
             "sí" if getattr(lector, "describir", None) else "no",
             "sí" if getattr(lector, "transcribir", None) else "no (falta OPENAI_API_KEY: pasan a una persona)",
             "calla al agente" if config.respetar_resueltas else "no cambia nada",
+            "por Cal.com" if agenda is not None else "apagadas (faltan CALCOM_API_KEY / CALCOM_EVENT_TYPE_ID)",
+            config.prompt_protocolo.name if config.prompt_protocolo else "no",
         )
         cuidar_el_permiso = (
             asyncio.create_task(mantener_el_permiso(avisos))
