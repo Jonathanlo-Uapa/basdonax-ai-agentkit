@@ -69,3 +69,12 @@ class Canal(ABC):
         defecto nadie se la saca: un canal sin bandeja (Telegram) no tiene quién.
         """
         return ""
+
+    def nota_interna(self, conversacion: str, texto: str) -> None:
+        """Deja una nota interna en la conversación, si el canal lo permite.
+
+        Por defecto no hace nada (canales sin bandeja humana).
+        """
+        pass
+
+

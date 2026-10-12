@@ -408,6 +408,22 @@ class Chatwoot(Canal):
             {"labels": etiquetas + [etiqueta]},
         )
 
+    def nota_interna(self, conversacion: str, texto: str) -> None:
+        """Deja una nota privada (amarilla) en la conversación de Chatwoot.
+
+        Solo la ve el equipo humano en la bandeja: al cliente no le llega por
+        WhatsApp ni por ningún canal externo.
+        """
+        if not texto or not texto.strip():
+            return
+        self._api(
+            "POST",
+            f"conversations/{conversacion}/messages",
+            {"content": texto.strip(), "message_type": "outgoing", "private": True},
+        )
+
+
+
     # -- Los datos del prospecto (las herramientas de ventas) ------------------
 
     def atributos(self, conversacion: str) -> dict:

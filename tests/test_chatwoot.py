@@ -1473,3 +1473,49 @@ def test_traspaso_cada_conversacion_escribe_solo_en_la_suya():
         assert esperar(lambda: canal.envios())
 
     assert set(canal.atributos_guardados) == {"57"}
+
+
+def test_nota_interna_sale_como_mensaje_privado():
+    """Una nota interna se envía a la API con private=True para que no le llegue al cliente."""
+    canal = ChatwootFalso()
+    canal.nota_interna("58", "Resumen de prueba")
+
+    assert canal.notas() == ["Resumen de prueba"]
+    assert canal.envios() == []
+
+
+def test_demo_confirmada_deja_nota_privada_con_ficha(monkeypatch):
+    """Al confirmar una demo, se genera automáticamente una nota interna con el resumen."""
+    from agente import herramientas
+    from test_ventas import AHORA, SABADO_9, CalcomDeMentira
+
+    monkeypatch.setattr(herramientas, "ahora_en_rd", lambda: AHORA)
+
+    canal = ChatwootFalso()
+    canal.atributos_guardados["59"] = {
+        "lead_nombre": "Carlos",
+        "negocio_nombre": "EcoWash",
+        "sucursales": 2,
+        "estaciones": 6,
+        "dolor_principal": "caja_ciega",
+        "lead_score": 85,
+    }
+    canal.telefono = "+18295551111"
+    agenda = CalcomDeMentira()
+    agente = agente_que_usa(
+        "confirmar_reserva_demo",
+        {"fecha_hora_iso": SABADO_9.isoformat(), "prospecto_nombre": "Carlos"},
+        "¡Listo! Agendado para el sábado.",
+    )
+
+    with cliente(canal, agente, agenda=agenda) as web:
+        web.post(f"/chatwoot/{TOKEN}", json=evento("confirmo el sábado", conversacion=59))
+        assert esperar(lambda: canal.notas())
+
+    assert len(canal.notas()) >= 1
+    nota = canal.notas()[0]
+    assert "EcoWash" in nota
+    assert "caja" in nota
+    assert "Carlos" in nota
+
+

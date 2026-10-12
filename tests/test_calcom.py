@@ -212,15 +212,16 @@ def test_calcom_sin_datos_avisa_que_faltan():
 @pytest.mark.parametrize(
     "comienzo, afuera",
     [
-        (datetime(2026, 10, 12, 18, 0, tzinfo=HORA_RD), False),   # lunes 18:00
-        (datetime(2026, 10, 12, 19, 45, tzinfo=HORA_RD), False),  # lunes, termina 20:00
-        (datetime(2026, 10, 12, 20, 0, tzinfo=HORA_RD), True),    # lunes 20:00: ya cerró
-        (datetime(2026, 10, 13, 19, 0, tzinfo=HORA_RD), True),    # martes: nada
+        (datetime(2026, 10, 12, 9, 0, tzinfo=HORA_RD), False),    # lunes 9:00
+        (datetime(2026, 10, 12, 20, 45, tzinfo=HORA_RD), False),  # lunes, termina 21:00
+        (datetime(2026, 10, 12, 21, 0, tzinfo=HORA_RD), True),    # lunes 21:00: ya cerró
+        (datetime(2026, 10, 13, 10, 0, tzinfo=HORA_RD), False),   # martes 10:00: abierto
         (datetime(2026, 10, 14, 20, 45, tzinfo=HORA_RD), False),  # miércoles, termina 21:00
-        (datetime(2026, 10, 16, 17, 45, tzinfo=HORA_RD), True),   # viernes antes de las 18
+        (datetime(2026, 10, 16, 8, 45, tzinfo=HORA_RD), True),    # viernes antes de las 9:00
         (datetime(2026, 10, 17, 9, 0, tzinfo=HORA_RD), False),    # sábado 9:00
-        (datetime(2026, 10, 18, 8, 45, tzinfo=HORA_RD), True),    # domingo antes de las 9
-        (datetime(2026, 10, 18, 20, 45, tzinfo=HORA_RD), False),  # domingo, termina 21:00
+        (datetime(2026, 10, 18, 13, 45, tzinfo=HORA_RD), True),   # domingo antes de las 14:00
+        (datetime(2026, 10, 18, 17, 45, tzinfo=HORA_RD), False),  # domingo, termina 18:00
+        (datetime(2026, 10, 18, 18, 0, tzinfo=HORA_RD), True),    # domingo 18:00: ya cerró
     ],
 )
 def test_calcom_probar_calcom_conoce_el_horario_acordado(comienzo, afuera):

@@ -23,10 +23,24 @@ Cal.com contesta con una versión vieja del mismo pedido y otra forma de datos.
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
+
+# En Windows o redes donde el proveedor tiene IPv6 sin salida activa a Cloudflare,
+# resolver IPv6 primero provoca que la conexión TLS se reinicie ([WinError 10054]).
+# Priorizar AF_INET (IPv4) asegura conexión inmediata sin tocar librerías externas.
+_getaddrinfo_original = socket.getaddrinfo
+
+
+def _getaddrinfo_ipv4_primero(host, port, family=0, type=0, proto=0, flags=0):
+    respuestas = _getaddrinfo_original(host, port, family, type, proto, flags)
+    return sorted(respuestas, key=lambda r: 0 if r[0] == socket.AF_INET else 1)
+
+
+socket.getaddrinfo = _getaddrinfo_ipv4_primero
 
 ZONA = "America/Santo_Domingo"
 

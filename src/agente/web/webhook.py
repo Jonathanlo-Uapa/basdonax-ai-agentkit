@@ -145,6 +145,49 @@ MAIL_DE_TRASPASO = """Una conversación de ventas pasó a una persona.
 {etiqueta}
 La conversación: {enlace}"""
 
+
+def armar_ficha_prospecto(attrs: dict, tel: str = "", fecha_hora: str = "") -> str:
+    """Ficha ejecutiva con las características del negocio para la nota interna de la llamada."""
+    nombre = attrs.get("lead_nombre") or "No indicado"
+    rol = attrs.get("rol") or "No indicado"
+    negocio = attrs.get("negocio_nombre") or "No indicado"
+    sucursales = attrs.get("sucursales") or 1
+    estaciones = attrs.get("estaciones") or "No indicado"
+    dolor = attrs.get("dolor_principal") or "No indicado"
+    software = attrs.get("software_actual") or "Cuaderno / No indicado"
+    urgencia = attrs.get("urgencia") or "No indicada"
+    segmento = attrs.get("segmento") or "Car Wash"
+    score = attrs.get("lead_score") or "N/D"
+    ruta = attrs.get("lead_ruta") or "demo"
+
+    traduccion_dolores = {
+        "caja_ciega": "Pérdida / descuadre en caja ciega nocturna",
+        "fuga_efectivo": "Fuga de efectivo y cobros no registrados",
+        "nomina_sabado": "Cálculo manual de nómina y comisiones de lavadores",
+        "seguro_lluvia": "Días de lluvia sin facturación / falta de ingresos recurrentes",
+        "dgii_fiscal": "Exigencia de facturación electrónica e-CF de DGII",
+    }
+    dolor_desc = traduccion_dolores.get(str(dolor), str(dolor))
+
+    lineas = [
+        "📋 RESUMEN DE PROSPECTO (Preparación de Llamada)",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"• Cliente / Contacto: {nombre} ({rol})",
+        f"• Negocio: {negocio} (Segmento: {segmento})",
+        f"• Sucursales: {sucursales} | Estaciones/Lavadores: {estaciones}",
+        f"• Dolor crítico detectado: {dolor_desc}",
+        f"• Software actual: {software}",
+        f"• Urgencia declarada: {urgencia}",
+        f"• Lead Score: {score} pts (Ruta: {str(ruta).upper()})",
+    ]
+    if fecha_hora:
+        lineas.append(f"• Horario Demo / Walkthrough: {fecha_hora} (Google Meet)")
+    if tel:
+        lineas.append(f"• WhatsApp: {tel}")
+    lineas.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lineas)
+
+
 CAUSA_MODELO = (
     "la clave del modelo (vencida o mal cargada en el servidor) o la cuenta del "
     "proveedor sin saldo."
@@ -477,6 +520,15 @@ def crear_app(
                         motivo=pedido.detalle,
                         chatwoot_url=canal.enlace(conversacion),
                     )
+                try:
+                    attrs_lead = await asyncio.to_thread(canal.atributos, conversacion)
+                    tel_lead = await asyncio.to_thread(canal.telefono_de, conversacion)
+                    if attrs_lead.get("negocio_nombre") or attrs_lead.get("lead_score"):
+                        ficha_traspaso = armar_ficha_prospecto(attrs_lead, tel_lead)
+                        await asyncio.to_thread(canal.nota_interna, conversacion, ficha_traspaso)
+                except Exception:
+                    pass
+
 
     async def responder(conversacion: str, texto: str) -> None:
         """Le pasa la ráfaga al agente y manda la respuesta por Chatwoot."""
@@ -567,27 +619,32 @@ def crear_app(
                 if contexto.pedidos:
                     await cumplir(conversacion, contexto.pedidos)
 
-                if slack.activo:
-                    attrs_despues: dict = {}
-                    tel = ""
-                    try:
-                        attrs_despues = await asyncio.to_thread(canal.atributos, conversacion)
-                        tel = await asyncio.to_thread(canal.telefono_de, conversacion)
-                    except Exception:
-                        pass
-                    nombre = str(
-                        attrs_despues.get("lead_nombre")
-                        or attrs_despues.get("negocio_nombre")
-                        or "Prospecto de WhatsApp"
-                    )
+                attrs_despues: dict = {}
+                tel = ""
+                try:
+                    attrs_despues = await asyncio.to_thread(canal.atributos, conversacion)
+                    tel = await asyncio.to_thread(canal.telefono_de, conversacion)
+                except Exception:
+                    pass
+                nombre = str(
+                    attrs_despues.get("lead_nombre")
+                    or attrs_despues.get("negocio_nombre")
+                    or "Prospecto de WhatsApp"
+                )
 
-                    # 1. ¿Se agendó una demo durante este turno?
-                    if (
-                        attrs_despues.get("demo_uid")
-                        and attrs_despues.get("demo_uid") != attrs_antes.get("demo_uid")
-                    ):
-                        registro.info("[%s] demo confirmada con Jonathan Lopez: aviso a Slack", conversacion)
-                        fecha_str = str(attrs_despues.get("demo_inicio") or "Horario confirmado")
+                # 1. ¿Se agendó una demo durante este turno?
+                if (
+                    attrs_despues.get("demo_uid")
+                    and attrs_despues.get("demo_uid") != attrs_antes.get("demo_uid")
+                ):
+                    registro.info("[%s] demo confirmada con Jonathan Lopez: aviso a Slack y nota interna", conversacion)
+                    fecha_str = str(attrs_despues.get("demo_inicio") or "Horario confirmado")
+                    ficha = armar_ficha_prospecto(attrs_despues, tel, fecha_str)
+                    try:
+                        await asyncio.to_thread(canal.nota_interna, conversacion, ficha)
+                    except Exception as e:
+                        registro.warning("[%s] no se pudo dejar nota interna en Chatwoot: %s", conversacion, e)
+                    if slack.activo:
                         await asyncio.to_thread(
                             slack.notificar_demo,
                             nombre=nombre,
@@ -598,21 +655,22 @@ def crear_app(
                             chatwoot_url=canal.enlace(conversacion),
                         )
 
-                    # 2. ¿Calificó para Free Trial durante este turno?
-                    if (
-                        attrs_despues.get("lead_score")
-                        and not attrs_antes.get("trial_avisado")
-                        and not attrs_despues.get("trial_avisado")
-                    ):
-                        score_val = int(attrs_despues.get("lead_score") or 0)
-                        if score_val >= 55 or attrs_despues.get("lead_ruta") in ("demo", "prueba"):
-                            try:
-                                await asyncio.to_thread(
-                                    canal.guardar_atributos, conversacion, {"trial_avisado": True}
-                                )
-                            except Exception:
-                                pass
-                            registro.info("[%s] free trial entregado: aviso a Slack", conversacion)
+                # 2. ¿Calificó para Free Trial durante este turno?
+                if (
+                    attrs_despues.get("lead_score")
+                    and not attrs_antes.get("trial_avisado")
+                    and not attrs_despues.get("trial_avisado")
+                ):
+                    score_val = int(attrs_despues.get("lead_score") or 0)
+                    if score_val >= 55 or attrs_despues.get("lead_ruta") in ("demo", "prueba"):
+                        try:
+                            await asyncio.to_thread(
+                                canal.guardar_atributos, conversacion, {"trial_avisado": True}
+                            )
+                        except Exception:
+                            pass
+                        registro.info("[%s] free trial entregado: aviso a Slack", conversacion)
+                        if slack.activo:
                             await asyncio.to_thread(
                                 slack.notificar_free_trial,
                                 nombre=nombre,
