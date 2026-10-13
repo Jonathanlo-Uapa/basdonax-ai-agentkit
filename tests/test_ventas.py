@@ -23,6 +23,8 @@ from agente.calcom import HORA_RD, ErrorDeCalcom  # noqa: E402
 from agente.herramientas import (  # noqa: E402
     HERRAMIENTAS,
     confirmar_reserva_demo,
+    consultar_reserva_demo,
+    solicitar_asesor_humano,
     sync_prospecto_chatwoot,
     verificar_disponibilidad_demo,
 )
@@ -521,7 +523,23 @@ def test_reserva_de_alto_valor_pide_pasarlo_a_una_persona():
 
 def test_las_herramientas_de_ventas_estan_en_la_lista_que_mira_el_grafo():
     nombres = {h.name for h in HERRAMIENTAS}
-    assert {"sync_prospecto_chatwoot", "verificar_disponibilidad_demo", "confirmar_reserva_demo"} <= nombres
+    assert {
+        "sync_prospecto_chatwoot",
+        "verificar_disponibilidad_demo",
+        "confirmar_reserva_demo",
+        "consultar_reserva_demo",
+        "solicitar_asesor_humano",
+    } <= nombres
+
+
+def test_solicitar_asesor_humano_pide_traspaso_a_persona():
+    ctx = contexto()
+    with atendiendo(ctx):
+        res = solicitar_asesor_humano.invoke({"motivo": "Quiero hablar con una persona"})
+    assert "Transferencia a asesor humano registrada" in res
+    assert len(ctx.pedidos) == 1
+    assert ctx.pedidos[0].tipo == A_UNA_PERSONA
+    assert "Quiero hablar con una persona" in ctx.pedidos[0].detalle
 
 
 def test_normalizar_etapa():

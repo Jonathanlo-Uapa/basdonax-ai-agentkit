@@ -256,16 +256,21 @@ class Chatwoot(Canal):
         return ""
 
     def ya_la_cerro(self, contacto_id: str) -> bool:
-        """Si esa persona tiene alguna conversación RESUELTA.
+        """Si esa persona tiene SOLO conversaciones resueltas y ninguna abierta.
 
         Resolver es una decisión: el agente no le vuelve a hablar a esa
         persona. Se mira el CONTACTO y no la conversación porque, según cómo
         esté la bandeja, Chatwoot abre una conversación NUEVA cuando alguien
         escribe después de que la suya se resolvió, y las etiquetas no viajan.
 
-        Si no se puede preguntar, se contesta: el riesgo del otro lado
-        (hablarle a alguien que se cerró) es una molestia; callarse con alguien
-        que está esperando es perderlo.
+        Sin embargo, si la persona tiene alguna conversación ABIERTA ('open'),
+        significa que está esperando activamente respuesta (o que escribió para
+        iniciar una nueva consulta): en ese caso NO se la considera cerrada y el
+        agente debe responder. Solo se frena si todas sus conversaciones están
+        resueltas y no hay ninguna abierta.
+
+        Si no se puede preguntar, se contesta: callarse con alguien que está
+        esperando es perder al cliente.
         """
         if not contacto_id:
             return False
@@ -273,10 +278,14 @@ class Chatwoot(Canal):
             respuesta = self._api("GET", f"contacts/{contacto_id}/conversations")
         except Exception:
             return False
+        convs = [c for c in respuesta.get("payload") or [] if isinstance(c, dict)]
+        if not convs:
+            return False
+        if any(str(c.get("status") or "").strip().lower() == "open" for c in convs):
+            return False
         return any(
             str(c.get("status") or "").strip().lower() == "resolved"
-            for c in respuesta.get("payload") or []
-            if isinstance(c, dict)
+            for c in convs
         )
 
     def mensaje(self, conversacion: str, id_mensaje) -> dict | None:

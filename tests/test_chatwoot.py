@@ -1068,6 +1068,29 @@ def test_si_chatwoot_no_contesta_la_segunda_mirada_se_responde_igual(monkeypatch
     assert canal.ya_la_cerro("300") is False
 
 
+def test_ya_la_cerro_no_silencia_si_hay_conversacion_abierta(monkeypatch):
+    from agente.canales.chatwoot import Chatwoot
+    canal = Chatwoot("http://chatwoot", "token", "1")
+
+    # Caso 1: Contacto con una resuelta y una abierta -> False (no silenciar)
+    monkeypatch.setattr(canal, "_api", lambda metodo, camino: {
+        "payload": [{"id": 1, "status": "resolved"}, {"id": 2, "status": "open"}]
+    })
+    assert canal.ya_la_cerro("300") is False
+
+    # Caso 2: Contacto solo con resueltas -> True
+    monkeypatch.setattr(canal, "_api", lambda metodo, camino: {
+        "payload": [{"id": 1, "status": "resolved"}]
+    })
+    assert canal.ya_la_cerro("300") is True
+
+    # Caso 3: Contacto solo con abiertas -> False
+    monkeypatch.setattr(canal, "_api", lambda metodo, camino: {
+        "payload": [{"id": 1, "status": "open"}]
+    })
+    assert canal.ya_la_cerro("300") is False
+
+
 def test_la_pausa_entre_globos_escribe_antes_de_cada_uno(monkeypatch):
     import agente.canales.chatwoot as chatwoot_mod
 

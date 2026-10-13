@@ -43,3 +43,33 @@ State one observable outcome per gate. Prove each outcome with an explicit comma
 - CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G7_VERIFIED')"
 - EXPECT: G7_VERIFIED
 - EVIDENCE: Verified on 2026-10-12. Output: G7_VERIFIED (Deployment in1gngavx4krs2rujovmdl4m finished, /salud 200 OK).
+
+## Gate G8: Conversation continuity & `ya_la_cerro` refactor
+- OUTCOME: `ya_la_cerro` never silences active open conversations of returning contacts, and `RESPETAR_RESUELTAS=0` is configured.
+- CHECK: .venv\Scripts\pytest tests/test_chatwoot.py -k "test_ya_la_cerro_no_silencia_si_hay_conversacion_abierta"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-12. Output: 1 passed in 1.45s.
+
+## Gate G9: Explicit Human Handover Tool (`solicitar_asesor_humano`)
+- OUTCOME: `solicitar_asesor_humano` tool exists, is in `HERRAMIENTAS`, and requests `A_UNA_PERSONA` with reason when invoked.
+- CHECK: .venv\Scripts\pytest tests/test_ventas.py -k "test_solicitar_asesor_humano"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-12. Output: 1 passed in 1.40s.
+
+## Gate G10: Prompt Policy & Strict Handoff Boundaries
+- OUTCOME: `prompts/protocolo_ventas.md` and `prompts/sistema.md` explicitly enforce continuous qualification without self-silencing and direct `solicitar_asesor_humano` exclusively for user requests.
+- CHECK: .venv\Scripts\python.exe -c "from pathlib import Path; p1 = Path('prompts/protocolo_ventas.md').read_text(encoding='utf-8'); p2 = Path('prompts/sistema.md').read_text(encoding='utf-8'); assert 'solicitar_asesor_humano' in p1 and 'solicitar_asesor_humano' in p2; print('G10_VERIFIED')"
+- EXPECT: G10_VERIFIED
+- EVIDENCE: Verified on 2026-10-12. Output: G10_VERIFIED.
+
+## Gate G11: Full regression test suite passing with 0 failures
+- OUTCOME: All 398 pytest unit and integration tests pass without token usage.
+- CHECK: .venv\Scripts\pytest
+- EXPECT: 398 passed
+- EVIDENCE: Verified on 2026-10-12. Output: 398 passed in 33.50s.
+
+## Gate G12: Production deployment & live health check
+- OUTCOME: Pushed to `origin/master`, Coolify deployment triggered, and live `/salud` endpoint responds with 200 OK.
+- CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G12_VERIFIED')"
+- EXPECT: G12_VERIFIED
+- EVIDENCE: Pending deployment.

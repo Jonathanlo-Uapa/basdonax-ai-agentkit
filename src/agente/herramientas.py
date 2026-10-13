@@ -686,6 +686,27 @@ def consultar_reserva_demo(
     return resultado
 
 
+@tool
+def solicitar_asesor_humano(motivo: str) -> str:
+    """Transfiere la conversación a un asesor humano del equipo de LavaPass.
+
+    Úsala EXCLUSIVAMENTE cuando el cliente o prospecto solicite de manera explícita
+    hablar con una persona, asesor humano, llamada o soporte personalizado
+    (por ejemplo: "quiero hablar con un humano", "pásame con un asesor", "hablar con alguien", "soporte técnico").
+
+    Args:
+        motivo: Explicación breve de lo que el cliente solicita o necesita atender con una persona.
+    """
+    contexto = en_curso()
+    if contexto is not None:
+        contexto.pedir(A_UNA_PERSONA, f"Solicitud explícita del cliente: {limpiar(motivo, 100)}")
+    return (
+        f"{INTERNO}\nTransferencia a asesor humano registrada. "
+        "Confírmale con calidez al cliente que un asesor de nuestro equipo lo atenderá directamente "
+        "por este chat en breve, o que también puede escribirnos o llamarnos al WhatsApp oficial +1 (829) 431-2114."
+    )
+
+
 # Lo que el agente tiene atado. Cuando agregues otra herramienta, sumala acá:
 # es la única lista que mira el grafo.
 HERRAMIENTAS = [
@@ -694,6 +715,7 @@ HERRAMIENTAS = [
     verificar_disponibilidad_demo,
     confirmar_reserva_demo,
     consultar_reserva_demo,
+    solicitar_asesor_humano,
 ]
 
 
