@@ -139,3 +139,9 @@ State one observable outcome per gate. Prove each outcome with an explicit comma
 - CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G23_VERIFIED')"
 - EXPECT: G23_VERIFIED
 - EVIDENCE: Verified on 2026-10-13. Output: G23_VERIFIED (Deployment rzf8jmc5ajhmwhdbkidxbfyn finished, /salud 200 OK).
+
+## Gate G24: Documento integral de auditoría de ventas y arquitectura E2E (`AUDITORIA_VENTAS_E2E.md`)
+- OUTCOME: `AUDITORIA_VENTAS_E2E.md` contiene la auditoría completa E2E con diagramas Mermaid, matriz determinista de scoring, simulaciones conversacionales turn-by-turn, sincronización de CRM Chatwoot/Cal.com y recomendaciones para auditores GTM.
+- CHECK: .venv\Scripts\python.exe -c "from pathlib import Path; p = Path('AUDITORIA_VENTAS_E2E.md'); assert p.exists(); text = p.read_text(encoding='utf-8'); assert 'mermaid' in text; assert 'Jonathan Lopez' in text; assert len(text.splitlines()) > 300; print('G24_VERIFIED')"
+- EXPECT: G24_VERIFIED
+- EVIDENCE: Verified on 2026-10-13. Output: G24_VERIFIED (Documento generado con 596 líneas, diagramas Mermaid, simulaciones E2E y recomendaciones GTM).
