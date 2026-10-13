@@ -109,3 +109,33 @@ State one observable outcome per gate. Prove each outcome with an explicit comma
 - CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G18_VERIFIED')"
 - EXPECT: G18_VERIFIED
 - EVIDENCE: Verified on 2026-10-13. Output: G18_VERIFIED (Deployment thflw9nyr6v7h5czo2zpmzhq finished, /salud 200 OK).
+
+## Gate G19: Sanitización y validación de enlace de reunión Google Meet en `webhook.py`
+- OUTCOME: `es_enlace_reunion_valido` descarta placeholders como 'integrations:google:meet' o cadenas no-http, y el webhook consulta a Cal.com API si no viene URL real.
+- CHECK: .venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'src'); from agente.web.webhook import es_enlace_reunion_valido; assert not es_enlace_reunion_valido('integrations:google:meet'); assert es_enlace_reunion_valido('https://meet.google.com/abc-xyz'); print('G19_VERIFIED')"
+- EXPECT: G19_VERIFIED
+- EVIDENCE: Verified on 2026-10-13. Output: G19_VERIFIED.
+
+## Gate G20: Chatwoot `actualizar_contacto` con email y `buscar_contacto` con normalización telefónica
+- OUTCOME: `actualizar_contacto` acepta parámetro `email` y `buscar_contacto` encuentra números con formato como '+1 (829) 329-2114'.
+- CHECK: .venv\Scripts\pytest tests/test_chatwoot.py -k "test_chatwoot_actualizar_contacto or test_chatwoot_buscar_contacto"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 2 passed, 112 deselected in 0.91s.
+
+## Gate G21: Webhook Cal.com actualiza correo de contacto, teléfono alterno y envía enlace real de Meet
+- OUTCOME: Webhook actualiza email en la ficha del contacto de Chatwoot, guarda teléfono alterno si difiere del WhatsApp principal, y no envía metadata de integraciones.
+- CHECK: .venv\Scripts\pytest tests/test_chatwoot.py -k "test_calcom_webhook"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 3 passed, 111 deselected in 1.11s.
+
+## Gate G22: Full regression test suite passing with 0 failures
+- OUTCOME: Toda la suite de pruebas unitarias e integrales pasa sin errores y sin gastar tokens de LLM.
+- CHECK: .venv\Scripts\pytest
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 400 passed in 28.79s.
+
+## Gate G23: Despliegue en producción y verificación en vivo
+- OUTCOME: Cambios pusheados a master, deploy finalizado en Coolify y `/salud` responde 200 OK.
+- CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G23_VERIFIED')"
+- EXPECT: G23_VERIFIED
+- EVIDENCE: pending

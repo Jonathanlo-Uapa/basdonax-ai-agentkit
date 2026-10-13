@@ -474,10 +474,11 @@ class Chatwoot(Canal):
         self,
         contacto_id: str,
         nombre: str | None = None,
+        email: str | None = None,
         telefono: str | None = None,
         atributos: dict | None = None,
     ) -> dict:
-        """Actualiza el nombre, teléfono y atributos personalizados de la ficha de contacto."""
+        """Actualiza el nombre, correo, teléfono y atributos personalizados de la ficha de contacto."""
         contacto_id = str(contacto_id or "").strip()
         if not contacto_id:
             return {}
@@ -485,6 +486,8 @@ class Chatwoot(Canal):
         cuerpo: dict = {}
         if nombre and str(nombre).strip():
             cuerpo["name"] = str(nombre).strip()
+        if email and str(email).strip():
+            cuerpo["email"] = str(email).strip()
         if telefono and str(telefono).strip():
             cuerpo["phone_number"] = str(telefono).strip()
 
@@ -515,7 +518,8 @@ class Chatwoot(Canal):
     def buscar_contacto(self, termino: str) -> dict | None:
         """Busca un contacto en Chatwoot por teléfono, correo o nombre.
 
-        Devuelve el primer contacto encontrado o None.
+        Devuelve el primer contacto encontrado o None. Si es un teléfono con formato
+        (guiones, paréntesis, espacios), prueba también buscando con variantes limpias.
         """
         termino = str(termino or "").strip()
         if not termino:
@@ -526,9 +530,29 @@ class Chatwoot(Canal):
             payload = res.get("payload") if isinstance(res, dict) else []
             if isinstance(payload, list) and payload:
                 primer = payload[0]
-                return primer if isinstance(primer, dict) else None
+                if isinstance(primer, dict):
+                    return primer
         except Exception:
             pass
+
+        # Si no se encontró y tiene dígitos (teléfono formateado), probar variantes de dígitos
+        digitos = "".join(c for c in termino if c.isdigit())
+        if len(digitos) >= 7:
+            variantes = [f"+{digitos}", digitos]
+            if len(digitos) >= 10:
+                variantes.append(digitos[-10:])
+            for v in variantes:
+                if v == termino:
+                    continue
+                try:
+                    res = self._api("GET", f"contacts/search?q={urllib.parse.quote(v)}")
+                    payload = res.get("payload") if isinstance(res, dict) else []
+                    if isinstance(payload, list) and payload:
+                        primer = payload[0]
+                        if isinstance(primer, dict):
+                            return primer
+                except Exception:
+                    pass
         return None
 
     def conversaciones_de_contacto(self, contacto_id: str) -> list[dict]:

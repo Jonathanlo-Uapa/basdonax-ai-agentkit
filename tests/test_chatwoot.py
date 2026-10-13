@@ -1572,8 +1572,15 @@ def test_chatwoot_contacto_id_de():
 
 def test_chatwoot_actualizar_contacto():
     canal = ChatwootFalso()
-    res = canal.actualizar_contacto("300", nombre="Lorenzo Lopez", telefono="+18092357447", atributos={"cargo": "Dueño"})
+    res = canal.actualizar_contacto(
+        "300",
+        nombre="Lorenzo Lopez",
+        email="lorenzo@ejemplo.com",
+        telefono="+18092357447",
+        atributos={"cargo": "Dueño"},
+    )
     assert canal.contactos_guardados["300"]["name"] == "Lorenzo Lopez"
+    assert canal.contactos_guardados["300"]["email"] == "lorenzo@ejemplo.com"
     assert canal.contactos_guardados["300"]["phone_number"] == "+18092357447"
     assert canal.contactos_guardados["300"]["custom_attributes"]["cargo"] == "Dueño"
 
@@ -1638,6 +1645,11 @@ def test_chatwoot_buscar_contacto_y_conversaciones():
     assert contacto["id"] == 300
     assert contacto["name"] == "Ana"
 
+    # Búsqueda con formato telefónico (+1 (809) 555-1234)
+    contacto_formateado = canal.buscar_contacto("+1 (809) 555-1234")
+    assert contacto_formateado is not None
+    assert contacto_formateado["id"] == 300
+
     convs = canal.conversaciones_de_contacto("300")
     assert len(convs) == 1
     assert convs[0]["id"] == 5
@@ -1694,6 +1706,11 @@ def test_calcom_webhook_con_metadata():
         assert attrs["demo_uid"] == "cal_booking_999"
         assert attrs["demo_inicio"] == "2026-10-15T14:00:00.000Z"
         assert attrs["etapa_embudo"] == "5_demo_agendada"
+        assert attrs["lead_email"] == "jonathan@ejemplo.com"
+        assert attrs["demo_meet_url"] == "https://meet.google.com/xyz-test"
+
+        # Contacto actualizado con su email
+        assert canal.contactos_guardados["300"]["email"] == "jonathan@ejemplo.com"
 
         # Etiquetas actualizadas
         assert "demo_agendada" in canal.etiquetas_de("12")
@@ -1716,6 +1733,7 @@ def test_calcom_webhook_con_metadata():
         notas = canal.notas()
         assert len(notas) >= 1
         assert "RESUMEN DE PROSPECTO" in notas[-1]
+        assert "jonathan@ejemplo.com" in notas[-1]
 
 
 def test_calcom_webhook_busqueda_contacto():
@@ -1736,6 +1754,7 @@ def test_calcom_webhook_busqueda_contacto():
                     "attendees": [
                         {
                             "name": "Ana Rodriguez",
+                            "email": "ana.calcom@ejemplo.com",
                             "phoneNumber": "+18095551234",
                         }
                     ],
@@ -1748,6 +1767,58 @@ def test_calcom_webhook_busqueda_contacto():
         assert res_ok.json()["conversacion"] == "5"
         attrs = canal.atributos("5")
         assert attrs["demo_uid"] == "cal_search_111"
+        assert attrs["lead_email"] == "ana.calcom@ejemplo.com"
         assert "demo_agendada" in canal.etiquetas_de("5")
+        # El perfil del contacto 300 se sincronizó con el email
+        assert canal.contactos_guardados["300"]["email"] == "ana.calcom@ejemplo.com"
+
+
+def test_calcom_webhook_telefono_alterno_y_descarte_metadata():
+    from test_agente import agente_falso
+
+    canal = ChatwootFalso()
+    agente = agente_falso(["hola"])
+
+    with cliente(canal, agente) as web:
+        # Webhook donde el cliente ingresó un teléfono secundario y Cal.com mandó metadata 'integrations:google:meet'
+        payload = {
+            "triggerEvent": "BOOKING_CREATED",
+            "payload": {
+                "booking": {
+                    "uid": "cal_alt_888",
+                    "startTime": "2026-10-17T16:00:00.000Z",
+                    "location": "integrations:google:meet",
+                    "meetingUrl": None,
+                    "attendees": [
+                        {
+                            "name": "Carlos Gomez",
+                            "email": "carlos@nuevonegocio.com",
+                            "phoneNumber": "+18299998888",  # Distinto al +18095551234 de WhatsApp
+                        }
+                    ],
+                    "metadata": {
+                        "conversacion_chatwoot": "12",
+                    },
+                }
+            },
+        }
+        res_ok = web.post(f"/calcom/webhook/{TOKEN}", json=payload)
+        assert res_ok.status_code == 200
+
+        # Atributos de conversación guardaron el teléfono alterno y email
+        attrs = canal.atributos("12")
+        assert attrs["telefono_alterno"] == "+18299998888"
+        assert attrs["lead_email"] == "carlos@nuevonegocio.com"
+
+        # Contacto guardó el teléfono alterno en atributos personalizados y en notas
+        assert canal.contactos_guardados["300"]["email"] == "carlos@nuevonegocio.com"
+        assert canal.contactos_guardados["300"]["custom_attributes"]["telefono_alterno"] == "+18299998888"
+        assert any("+18299998888" in n["content"] for n in canal.notas_contacto)
+
+        # Mensaje de WhatsApp NO contiene la metadata 'integrations:google:meet'
+        envios = canal.envios()
+        assert len(envios) == 3
+        assert "integrations:google:meet" not in envios[0]
+        assert "carlos@nuevonegocio.com" in envios[0]
 
 

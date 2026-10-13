@@ -180,6 +180,7 @@ def sync_prospecto_chatwoot(
     segmento: str | None = None,
     software_actual: str | None = None,
     urgencia: str | None = None,
+    lead_email: str | None = None,
 ) -> str:
     """Guarda en el CRM lo que sabes del prospecto y te dice el siguiente paso.
 
@@ -230,6 +231,7 @@ def sync_prospecto_chatwoot(
         "segmento": segmento,
         "software_actual": software_actual,
         "urgencia": urgencia,
+        "lead_email": limpiar(lead_email, 120) if lead_email else None,
     }
     nuevos = {k: v for k, v in nuevos.items() if v not in (None, "")}
 
@@ -373,7 +375,12 @@ def sync_prospecto_chatwoot(
 
         if cid:
             try:
-                contexto.canal.actualizar_contacto(cid, nombre=nombre_crm, atributos=attrs_contacto)
+                contexto.canal.actualizar_contacto(
+                    cid,
+                    nombre=nombre_crm,
+                    email=datos.get("lead_email") or None,
+                    atributos=attrs_contacto,
+                )
             except Exception as e:
                 registro.warning("[%s] no se pudo actualizar contacto en Chatwoot: %s", contexto.conversacion, e)
 

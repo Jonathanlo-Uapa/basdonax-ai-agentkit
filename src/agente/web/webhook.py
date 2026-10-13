@@ -153,7 +153,23 @@ MAIL_DE_TRASPASO = """Una conversación de ventas pasó a una persona.
 La conversación: {enlace}"""
 
 
-def armar_ficha_prospecto(attrs: dict, tel: str = "", fecha_hora: str = "") -> str:
+def es_enlace_reunion_valido(url: str) -> bool:
+    """Verifica que sea un enlace web real (http/https) y no un placeholder o metadata."""
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    if u.lower().startswith("integrations:") or not (u.startswith("https://") or u.startswith("http://")):
+        return False
+    return True
+
+
+def armar_ficha_prospecto(
+    attrs: dict,
+    tel: str = "",
+    fecha_hora: str = "",
+    email: str = "",
+    tel_alterno: str = "",
+) -> str:
     """Ficha ejecutiva con las características del negocio para la nota interna de la llamada."""
     nombre = attrs.get("lead_nombre") or "No indicado"
     rol = attrs.get("rol") or "No indicado"
@@ -189,8 +205,12 @@ def armar_ficha_prospecto(attrs: dict, tel: str = "", fecha_hora: str = "") -> s
     ]
     if fecha_hora:
         lineas.append(f"• Horario Demo / Walkthrough: {fecha_hora} (Google Meet)")
+    if email:
+        lineas.append(f"• Email: {email}")
     if tel:
         lineas.append(f"• WhatsApp: {tel}")
+    if tel_alterno:
+        lineas.append(f"• Teléfono alterno (Cal.com): {tel_alterno}")
     lineas.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     return "\n".join(lineas)
 
@@ -1185,13 +1205,49 @@ def crear_app(
         booking = payload.get("booking") if isinstance(payload.get("booking"), dict) else payload
         uid = str(booking.get("uid") or "").strip()
         start_raw = str(booking.get("startTime") or booking.get("start") or "").strip()
-        meet_url = str(booking.get("meetingUrl") or booking.get("location") or "").strip()
+
+        # Buscar enlaces de reunión en todos los lugares posibles del payload
+        candidatos_meet = [
+            str(booking.get("meetingUrl") or "").strip(),
+            str(booking.get("videoCallUrl") or "").strip(),
+            str((booking.get("metadata") or {}).get("videoCallUrl") or "").strip(),
+            str(booking.get("location") or "").strip(),
+            str(payload.get("meetingUrl") or "").strip(),
+            str(payload.get("videoCallUrl") or "").strip(),
+            str((payload.get("metadata") or {}).get("videoCallUrl") or "").strip(),
+            str(payload.get("location") or "").strip(),
+        ]
+        meet_url = next((c for c in candidatos_meet if es_enlace_reunion_valido(c)), "")
 
         attendees = booking.get("attendees") or []
         primer_att = attendees[0] if isinstance(attendees, list) and attendees and isinstance(attendees[0], dict) else {}
         nombre = str(primer_att.get("name") or "Cliente").strip()
         email = str(primer_att.get("email") or "").strip()
         telefono = str(primer_att.get("phoneNumber") or "").strip()
+
+        # Si no vino enlace HTTP de Meet o falta email/teléfono, consultar la API de Cal.com
+        if agenda is not None and uid and (not meet_url or not email or not telefono):
+            for intento in range(2):
+                try:
+                    res_cal = await asyncio.to_thread(agenda.consultar_reserva, uid=uid)
+                    if res_cal:
+                        c_enl = str(res_cal.get("enlace") or "").strip()
+                        if not meet_url and es_enlace_reunion_valido(c_enl):
+                            meet_url = c_enl
+                        if not email and res_cal.get("email"):
+                            email = str(res_cal["email"]).strip()
+                        if not telefono and res_cal.get("telefono"):
+                            telefono = str(res_cal["telefono"]).strip()
+                        if meet_url:
+                            break
+                except Exception as e:
+                    registro.warning("Error consultando reserva %s en Cal.com: %s", uid, e)
+                if not meet_url and intento == 0:
+                    await asyncio.sleep(1.0)
+
+        # Sanitizar meet_url: NUNCA enviar 'integrations:google:meet' u otras cadenas no-URL
+        if not es_enlace_reunion_valido(meet_url):
+            meet_url = ""
 
         metadata = booking.get("metadata") if isinstance(booking.get("metadata"), dict) else {}
         conversacion_id = str(metadata.get("conversacion_chatwoot") or metadata.get("conversacion") or "").strip()
@@ -1217,6 +1273,57 @@ def crear_app(
                     except Exception:
                         pass
 
+        if conversacion_id and not contacto_id and hasattr(canal, "contacto_id_de"):
+            try:
+                contacto_id = await asyncio.to_thread(canal.contacto_id_de, conversacion_id)
+            except Exception:
+                pass
+
+        tel_wa = ""
+        if conversacion_id and hasattr(canal, "telefono_de"):
+            try:
+                tel_wa = await asyncio.to_thread(canal.telefono_de, conversacion_id)
+            except Exception:
+                pass
+
+        dig_wa = "".join(c for c in tel_wa if c.isdigit())
+        dig_cal = "".join(c for c in telefono if c.isdigit())
+        es_mismo_tel = False
+        if dig_wa and dig_cal:
+            min_len = min(len(dig_wa), len(dig_cal))
+            if min_len >= 7:
+                es_mismo_tel = dig_wa.endswith(dig_cal[-7:]) or dig_cal.endswith(dig_wa[-7:])
+        elif not dig_cal:
+            es_mismo_tel = True
+
+        tel_alterno = telefono if (dig_cal and not es_mismo_tel) else ""
+
+        # Sincronizar ficha de contacto en Chatwoot (email y teléfono alterno)
+        if contacto_id and hasattr(canal, "actualizar_contacto"):
+            attrs_contacto = {}
+            if tel_alterno:
+                attrs_contacto["telefono_alterno"] = tel_alterno
+            try:
+                await asyncio.to_thread(
+                    canal.actualizar_contacto,
+                    contacto_id,
+                    email=email or None,
+                    telefono=telefono if not dig_wa else None,
+                    atributos=attrs_contacto if attrs_contacto else None,
+                )
+            except Exception as e:
+                registro.warning("No se pudo actualizar contacto %s en Chatwoot: %s", contacto_id, e)
+
+        if contacto_id and tel_alterno and hasattr(canal, "nota_de_contacto"):
+            try:
+                await asyncio.to_thread(
+                    canal.nota_de_contacto,
+                    contacto_id,
+                    f"📞 Teléfono alterno registrado en Cal.com: {tel_alterno}",
+                )
+            except Exception as e:
+                registro.warning("No se pudo guardar nota de teléfono alterno en contacto %s: %s", contacto_id, e)
+
         momento_inicio = None
         if start_raw:
             try:
@@ -1229,16 +1336,20 @@ def crear_app(
 
         attrs_crm = {}
         if conversacion_id:
+            atributos_conv = {
+                "demo_uid": uid,
+                "demo_inicio": start_raw,
+                "etapa_embudo": "5_demo_agendada",
+            }
+            if email:
+                atributos_conv["lead_email"] = email
+            if tel_alterno:
+                atributos_conv["telefono_alterno"] = tel_alterno
+            if meet_url:
+                atributos_conv["demo_meet_url"] = meet_url
+
             try:
-                await asyncio.to_thread(
-                    canal.guardar_atributos,
-                    conversacion_id,
-                    {
-                        "demo_uid": uid,
-                        "demo_inicio": start_raw,
-                        "etapa_embudo": "5_demo_agendada",
-                    },
-                )
+                await asyncio.to_thread(canal.guardar_atributos, conversacion_id, atributos_conv)
             except Exception as e:
                 registro.warning("[%s] no se pudo guardar atributos de demo en Chatwoot: %s", conversacion_id, e)
 
@@ -1258,16 +1369,29 @@ def crear_app(
                 attrs_crm = await asyncio.to_thread(canal.atributos, conversacion_id)
             except Exception:
                 pass
-            ficha = armar_ficha_prospecto(attrs_crm, telefono, fecha_str)
+            ficha = armar_ficha_prospecto(
+                attrs_crm,
+                tel=tel_wa or telefono,
+                fecha_hora=fecha_str,
+                email=email,
+                tel_alterno=tel_alterno,
+            )
             try:
                 await asyncio.to_thread(canal.nota_interna, conversacion_id, ficha)
             except Exception:
                 pass
 
+            if meet_url:
+                bloque_enlace = f"Aquí tienes tu enlace de acceso directo:\n{meet_url}"
+            elif email:
+                bloque_enlace = f"Tu enlace de Google Meet te llegará directamente a tu correo ({email})."
+            else:
+                bloque_enlace = "Tu enlace de Google Meet te llegará directamente a tu correo electrónico."
+
             msg_cita = (
                 f"¡Excelente, {nombre}! 🚀 Acabo de confirmar tu videollamada para el {fecha_str} "
                 f"con Jonathan Lopez (COO) por Google Meet.\n\n"
-                f"Aquí tienes tu enlace de acceso directo:\n{meet_url or 'Google Meet (te llegará por correo)'}\n\n"
+                f"{bloque_enlace}\n\n"
                 f"Te enviaremos un recordatorio 15 minutos antes de la cita para que lo tengas fresco 📲"
             )
             msg_trial = (
