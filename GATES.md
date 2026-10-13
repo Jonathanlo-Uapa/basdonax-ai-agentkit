@@ -73,3 +73,39 @@ State one observable outcome per gate. Prove each outcome with an explicit comma
 - CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G12_VERIFIED')"
 - EXPECT: G12_VERIFIED
 - EVIDENCE: Verified on 2026-10-12. Output: G12_VERIFIED (Deployment chf63hulj92jevemte3qkntt finished, /salud 200 OK, running:healthy).
+
+## Gate G13: Encargado as decision maker & demo route qualification in `ventas.py`
+- OUTCOME: `QUIEN_DECIDE` includes 'encargado', and `ruta(rol='encargado', estaciones=2, sucursales=1, dolor='caja_ciega')` returns 'demo'.
+- CHECK: .venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'src'); from agente.ventas import QUIEN_DECIDE, ruta; assert 'encargado' in QUIEN_DECIDE; assert ruta(rol='encargado', estaciones=2, sucursales=1, dolor='caja_ciega') == 'demo'; print('G13_VERIFIED')"
+- EXPECT: G13_VERIFIED
+- EVIDENCE: Verified on 2026-10-13. Output: G13_VERIFIED.
+
+## Gate G14: Cal.com webhook 3-part message dispatch on booking creation
+- OUTCOME: Webhook dispatches Meet confirmation, Free Trial 7 days register link (https://panel.lavapass.app/register), and functional assistance message.
+- CHECK: .venv\Scripts\pytest tests/test_chatwoot.py -k "test_calcom_webhook"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 2 passed, 111 deselected in 1.13s.
+
+## Gate G15: Tool guidance for step 6 (pure demo pitch) and step 7 (post-booking trial + Q&A)
+- OUTCOME: `sync_prospecto_chatwoot` step 6 does not include premature register link or 3 buttons; `confirmar_reserva_demo` returns guidance for post-booking trial link and open Q&A.
+- CHECK: .venv\Scripts\pytest tests/test_ventas.py -k "test_demo_flow_advice"
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 1 passed, 61 deselected in 0.72s.
+
+## Gate G16: Prompts alignment for 3 qualifying roles and decoupled free-trial delivery
+- OUTCOME: `prompts/protocolo_ventas.md` and `prompts/sistema.md` specify that Dueño, Administrador and Encargado qualify for demo, remove the 3 old buttons (`Agendar Demo | Probar 7 Días | Hablar Asesor`), and instruct delivering the trial link and open Q&A only after booking.
+- CHECK: .venv\Scripts\python.exe -c "from pathlib import Path; p1 = Path('prompts/protocolo_ventas.md').read_text(encoding='utf-8'); p2 = Path('prompts/sistema.md').read_text(encoding='utf-8'); assert 'Agendar Demo | 🚀 Probar 7 Días' not in p1; assert 'Encargados' in p1 or 'encargado' in p1; assert 'Google Meet' in p2; print('G16_VERIFIED')"
+- EXPECT: G16_VERIFIED
+- EVIDENCE: Verified on 2026-10-13. Output: G16_VERIFIED.
+
+## Gate G17: Full regression test suite passing with 0 failures
+- OUTCOME: All unit and integration tests pass without errors.
+- CHECK: .venv\Scripts\pytest
+- EXPECT: passed
+- EVIDENCE: Verified on 2026-10-13. Output: 399 passed in 29.22s.
+
+## Gate G18: Production deployment & live health verification
+- OUTCOME: Changes pushed to `origin/master`, Coolify deploy finished, and live `/salud` responds 200 OK.
+- CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G18_VERIFIED')"
+- EXPECT: G18_VERIFIED
+- EVIDENCE: pending

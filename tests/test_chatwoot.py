@@ -1699,12 +1699,18 @@ def test_calcom_webhook_con_metadata():
         assert "demo_agendada" in canal.etiquetas_de("12")
         assert "5_demo_agendada" in canal.etiquetas_de("12")
 
-        # Mensaje de confirmación enviado por WhatsApp
+        # Mensajes de confirmación enviados por WhatsApp (3 mensajes separados)
         envios = canal.envios()
-        assert len(envios) >= 1
-        assert "https://meet.google.com/xyz-test" in envios[-1]
-        assert "15 minutos antes" in envios[-1]
-        assert "Jonathan Lopez" in envios[-1]
+        assert len(envios) == 3
+        # 1. Cita y Meet
+        assert "https://meet.google.com/xyz-test" in envios[0]
+        assert "15 minutos antes" in envios[0]
+        assert "Jonathan Lopez" in envios[0]
+        # 2. Entrega de prueba gratis de 7 días
+        assert "https://panel.lavapass.app/register" in envios[1]
+        assert "7 días" in envios[1]
+        # 3. Preguntas abiertas
+        assert "preguntas" in envios[2] or "dudas" in envios[2]
 
         # Nota interna guardada
         notas = canal.notas()

@@ -294,25 +294,25 @@ def sync_prospecto_chatwoot(
         paso = "Ya tiene la demo agendada: no la ofrezcas de nuevo. Responde sus dudas."
     elif elegida == "demo":
         paso = (
-            "Califica para la demo y prueba. Ofrece la prueba de 7 días con framing premiante "
-            "('has sido seleccionado para una prueba gratis personalizada en https://panel.lavapass.app/register') "
-            f"y propón proactivamente agendar la llamada de bienvenida y walkthrough de 15 minutos con {ANFITRION} (COO de LavaPass) "
-            "para mostrar cada funcionalidad en pantalla, resolver dudas y asegurar el éxito de su operación. "
-            "Usa verificar_disponibilidad_demo para ofrecer horarios reales de Cal.com."
+            f"Califica para la demo y videollamada de bienvenida y walkthrough de 15 minutos con {ANFITRION} (COO de LavaPass) por Google Meet. "
+            "Procede EXCLUSIVAMENTE a proponer la cita: dile que por el tamaño de su operación fue seleccionado para esta sesión personalizada "
+            "para ver cómo resolver su desafío operativo en vivo y dejar su Car Wash listo para operar. "
+            "Ofrécele agendar directamente en nuestro link oficial de Cal.com: https://cal.com/lavapass/demo-e-introduccion-lavapass "
+            "o consultando horarios con verificar_disponibilidad_demo para que elija uno. "
+            "NO envíes todavía el enlace de registro de la prueba gratis ni pongas botones de 'Agendar / Probar / Hablar Asesor': "
+            "el período de prueba gratis se le entrega en la confirmación una vez agendada la cita."
         )
         if dolor == "dgii_fiscal":
             paso += (
                 " Confirma que con LavaPass emite comprobantes electrónicos e-CF Tipo 31 "
-                "y que nuestro equipo fiscal le contactará a la brevedad para gestionar y activar su facturación electrónica ante la DGII."
+                "y que nuestro equipo fiscal le asistirá para gestionar y activar su facturación electrónica ante la DGII."
             )
     elif elegida == "prueba":
         paso = (
-            "Califica para la prueba de 7 días (https://panel.lavapass.app/register) "
-            "para que valide el sistema en el área de lavado desde el celular. "
-            f"Pide amablemente el contacto del dueño o administrador para coordinar la llamada de bienvenida y walkthrough conjunto con {ANFITRION}."
+            f"No califica directamente para la videollamada con {ANFITRION} (COO de LavaPass). "
+            "Ofrécele la prueba de 7 días (https://panel.lavapass.app/register) "
+            "para que valide el sistema en el área de lavado desde el celular."
         )
-        if rol_dato == "encargado":
-            paso += " Pide amablemente el contacto del dueño o administrador para coordinar la llamada de bienvenida y activación conjunta."
     else:
         falta = []
         if not datos.get("rol") or datos.get("rol") == "otro":
@@ -601,12 +601,15 @@ def confirmar_reserva_demo(fecha_hora_iso: str, prospecto_nombre: str) -> str:
     if guardados.get("alto_valor"):
         contexto.pedir(A_UNA_PERSONA, f"Prospecto de alto valor con demo el {_cuando(reserva['comienzo'])}.")
 
+    enl = f" Enlace: {reserva['enlace']}" if reserva.get("enlace", "").startswith("https://") else ""
     texto = (
-        f"{INTERNO}\nDemo reservada: {_cuando(reserva['comienzo'])} (hora de RD), "
-        f"15 minutos con {ANFITRION} por Google Meet. Confírmale el día y la hora exactos."
+        f"{INTERNO}\nDemo reservada exitosamente: {_cuando(reserva['comienzo'])} (hora de RD), "
+        f"15 minutos con {ANFITRION} por Google Meet.{enl}\n"
+        "Estructura obligatoria de tu respuesta al prospecto (en mensajes claros):\n"
+        "1. Confirmación de Cita: Confírmale con entusiasmo el día y la hora exactos, dale el enlace de Google Meet y recuérdale que le llegará un recordatorio 15 minutos antes.\n"
+        "2. Entrega del Período de Prueba: Dile que como ya tiene su sesión agendada, ha sido seleccionado para una prueba gratis personalizada de 7 días de LavaPass (sin tarjeta ni contratos, se activa en 3 min en https://panel.lavapass.app/register para ir explorando el sistema antes de la llamada).\n"
+        "3. Apertura para Preguntas: En un mensaje aparte, recuérdale que estás a su orden para responder cualquier duda sobre funcionalidades de LavaPass, cuadre de caja o comisiones mientras llega el día de la reunión."
     )
-    if reserva["enlace"].startswith("https://"):
-        texto += f" El enlace de la videollamada: {reserva['enlace']}"
     return texto
 
 
@@ -681,7 +684,10 @@ def consultar_reserva_demo(
         f"{INTERNO}\nReserva confirmada en Cal.com: {fecha_formateada} (hora de RD).\n"
         f"Videollamada de 15 minutos con {ANFITRION} por Google Meet.\n"
         f"Enlace: {reserva.get('enlace') or 'Google Meet (por llegar)'}. Asistente: {reserva.get('asistente') or 'Prospecto'}.\n"
-        "Confírmale con entusiasmo el día y la hora exactos, dale el enlace de Google Meet y avísale que recibirá un recordatorio 15 minutos antes."
+        "Estructura obligatoria de tu respuesta al prospecto (en mensajes claros):\n"
+        "1. Confirmación de Cita: Confírmale con entusiasmo el día y la hora exactos, dale el enlace de Google Meet y recuérdale que recibirá un recordatorio 15 minutos antes.\n"
+        "2. Entrega del Período de Prueba: Dile que como ya tiene su sesión agendada, ha sido seleccionado para una prueba gratis personalizada de 7 días de LavaPass (sin tarjeta ni contratos, se activa en 3 min en https://panel.lavapass.app/register para ir explorando el sistema antes de la reunión).\n"
+        "3. Apertura para Preguntas: En un mensaje aparte, ofrécete con gusto para responder cualquier duda sobre funcionalidades de LavaPass mientras llega el día de la cita."
     )
     return resultado
 

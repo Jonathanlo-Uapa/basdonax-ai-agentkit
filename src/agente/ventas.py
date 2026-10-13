@@ -48,7 +48,7 @@ MAPA_ETAPAS_LEGACY = {
     "descartado": "8_descartado",
 }
 FRANJAS = ("manana", "tarde", "noche", "cualquiera")
-QUIEN_DECIDE = ("dueno", "administrador")
+QUIEN_DECIDE = ("dueno", "administrador", "encargado")
 
 def normalizar_etapa(etapa: str | None) -> str:
     """Traduce etapas legacy al nuevo formato de 8 etapas con prefijo numérico."""
@@ -272,7 +272,7 @@ def ruta(
     grande = es_alto_valor(estaciones, sucursales, rol)
     es_dgii = dolor == "dgii_fiscal"
 
-    if decide and operacion and (puntos >= UMBRAL_DEMO or grande or es_dgii):
+    if decide and operacion and (puntos >= UMBRAL_DEMO or grande or es_dgii or (dolor not in ("", "ninguno") and puntos >= UMBRAL_PRUEBA)):
         return "demo"
     if operacion and puntos >= UMBRAL_PRUEBA:
         return "prueba"

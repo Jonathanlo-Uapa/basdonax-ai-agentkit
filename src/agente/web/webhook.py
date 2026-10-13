@@ -1264,16 +1264,24 @@ def crear_app(
             except Exception:
                 pass
 
-            msg_confirmacion = (
+            msg_cita = (
                 f"¡Excelente, {nombre}! 🚀 Acabo de confirmar tu videollamada para el {fecha_str} "
                 f"con Jonathan Lopez (COO) por Google Meet.\n\n"
                 f"Aquí tienes tu enlace de acceso directo:\n{meet_url or 'Google Meet (te llegará por correo)'}\n\n"
-                f"Te enviaremos un recordatorio 15 minutos antes de la cita para que lo tengas fresco 📲 "
-                f"Mientras llega el día, ¿tienes alguna duda puntual sobre el control de caja o comisiones de "
-                f"lavadores que quieras que Jonathan te muestre en pantalla?"
+                f"Te enviaremos un recordatorio 15 minutos antes de la cita para que lo tengas fresco 📲"
+            )
+            msg_trial = (
+                f"Y como ya tienes tu sesión programada, ¡has sido seleccionado para una prueba gratis personalizada de 7 días de LavaPass! 🎉\n\n"
+                f"Sin tarjeta de crédito ni contratos, puedes activar tu cuenta en 3 minutos aquí:\n"
+                f"👉 https://panel.lavapass.app/register\n\n"
+                f"Así puedes ir explorando el sistema y en la llamada con Jonathan dejamos todo configurado a la medida de tu Car Wash."
+            )
+            msg_preguntas = (
+                f"Mientras llega el día de la reunión, estoy aquí a la orden. Si tienes cualquier duda sobre alguna funcionalidad de LavaPass, "
+                f"el cuadre de caja ciega o comisiones de lavadores, ¡solo escríbeme tus preguntas y con mucho gusto te respondo! 💬"
             )
             try:
-                await asyncio.to_thread(canal.enviar, conversacion_id, [msg_confirmacion])
+                await asyncio.to_thread(canal.enviar, conversacion_id, [msg_cita, msg_trial, msg_preguntas])
             except Exception as e:
                 registro.warning("[%s] no se pudo enviar confirmación por WhatsApp: %s", conversacion_id, e)
 

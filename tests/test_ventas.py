@@ -142,7 +142,7 @@ def test_puntaje_de_la_tabla(rol, estaciones, sucursales, dolor, esperado):
         ("dueno", 1, 1, "ninguno", "prueba"),
         ("dueno", 0, 0, "caja_ciega", "diagnosticar"),
         ("encargado", 2, 1, "ninguno", "diagnosticar"),
-        ("encargado", 2, 1, "caja_ciega", "prueba"),
+        ("encargado", 2, 1, "caja_ciega", "demo"),
         ("administrador", 1, 1, "nomina_sabado", "demo"),
         ("dueno", 1, 1, "caja_ciega", "demo"),
         ("dueno", 0, 3, "ninguno", "demo"),
@@ -223,7 +223,7 @@ def test_ruta_dueño_grande_sí_va_a_demo():
     assert "Califica para la demo" in texto
 
 
-def test_ruta_encargado_con_dolor_va_a_prueba_y_pide_al_dueño():
+def test_ruta_encargado_con_dolor_califica_para_demo():
     ctx = contexto()
     texto = sync(
         ctx,
@@ -232,9 +232,30 @@ def test_ruta_encargado_con_dolor_va_a_prueba_y_pide_al_dueño():
         sucursales_count=1,
         dolor_principal="caja_ciega",
     )
-    assert ctx.canal.datos["55"]["lead_ruta"] == "prueba"
-    assert "Pide amablemente el contacto del dueño" in texto
-    assert "Califica para la demo" not in texto
+    assert ctx.canal.datos["55"]["lead_ruta"] == "demo"
+    assert "Califica para la demo" in texto
+    assert "https://cal.com/lavapass/demo-e-introduccion-lavapass" in texto
+
+
+def test_demo_flow_advice():
+    ctx = contexto()
+    texto = sync(
+        ctx,
+        rol="dueno",
+        estaciones_count=3,
+        sucursales_count=1,
+        dolor_principal="caja_ciega",
+    )
+    assert "Califica para la demo" in texto
+    assert "https://cal.com/lavapass/demo-e-introduccion-lavapass" in texto
+    assert "NO envíes todavía el enlace de registro de la prueba gratis" in texto
+
+    ctx_reserva = contexto(calcom=CalcomDeMentira())
+    with atendiendo(ctx_reserva):
+        res_texto = confirmar_reserva_demo.invoke({"fecha_hora_iso": SABADO_9.isoformat(), "prospecto_nombre": "Carlos"})
+    assert "Demo reservada exitosamente" in res_texto
+    assert "https://panel.lavapass.app/register" in res_texto
+    assert "Apertura para Preguntas" in res_texto
 
 
 def test_puntaje_el_modelo_no_puede_marcar_una_demo_que_no_existe():
