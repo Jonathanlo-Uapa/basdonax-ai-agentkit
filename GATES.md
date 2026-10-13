@@ -108,4 +108,4 @@ State one observable outcome per gate. Prove each outcome with an explicit comma
 - OUTCOME: Changes pushed to `origin/master`, Coolify deploy finished, and live `/salud` responds 200 OK.
 - CHECK: .venv\Scripts\python.exe -c "import urllib.request, json; resp = urllib.request.urlopen('http://u3v9fbhv9lglh6euimsibsr1.179.236.245.155.sslip.io/salud', timeout=15); data = json.loads(resp.read().decode()); assert data.get('estado') == 'ok'; print('G18_VERIFIED')"
 - EXPECT: G18_VERIFIED
-- EVIDENCE: pending
+- EVIDENCE: Verified on 2026-10-13. Output: G18_VERIFIED (Deployment thflw9nyr6v7h5czo2zpmzhq finished, /salud 200 OK).
