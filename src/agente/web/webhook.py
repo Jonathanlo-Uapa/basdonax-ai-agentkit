@@ -1029,6 +1029,7 @@ def crear_app(
         """
         return {
             "estado": "ok",
+            "version": "v3.0-revenue-engine",
             "proveedor": config.proveedor,
             "modelo": config.modelo,
             "memoria": "postgres" if config.modo == "produccion" else "sqlite",
